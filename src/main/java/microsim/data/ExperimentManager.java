@@ -6,6 +6,8 @@ import java.io.FileOutputStream;
 import java.nio.channels.FileChannel;
 import java.sql.Date;
 
+import jakarta.persistence.EntityManager;
+
 import microsim.data.db.DatabaseUtils;
 import microsim.data.db.Experiment;
 
@@ -184,20 +186,29 @@ public class ExperimentManager {
             DatabaseUtils.databaseInputUrl = Experiment.inputFolder + File.separator + "input";
         }
 
-        if (saveExperimentOnDatabase) {
-            log.debug("Creating experiment on output database");
+        if (saveExperimentOnDatabase && !DatabaseUtils.isOutputInitialized()) {
+            log.debug("Initialising session output database");
             File dbFile = new File(experiment.getOutputFolder() + File.separator + "database");
             if (!dbFile.exists())
                 dbFile.mkdir();
 
+            DatabaseUtils.databaseOutputUrl = experiment.getOutputFolder() + File.separator + "database"
+                    + File.separator + "out";
+        }
+
+        if (saveExperimentOnDatabase) {
             if (copyInputFolderStructure) {
                 DatabaseUtils.databaseInputUrl = outFolder + File.separator + "input";
             }
-            DatabaseUtils.databaseOutputUrl = experiment.getOutputFolder() + File.separator + "database"
-                    + File.separator + "out";
-
-            experiment = DatabaseUtils.createExperiment(DatabaseUtils.getOutEntityManger(), experiment, models);
-            log.debug("Created experiment with id " + experiment.id);
+            String outputFolder = experiment.getOutputFolder();
+            EntityManager entityManager = DatabaseUtils.getOutEntityManger();
+            try {
+                experiment = DatabaseUtils.createExperiment(entityManager, experiment, models);
+                experiment.setOutputFolder(outputFolder);
+                log.debug("Created experiment with id " + experiment.id);
+            } finally {
+                if (entityManager != null && entityManager.isOpen()) entityManager.close();
+            }
         }
         return experiment;
     }

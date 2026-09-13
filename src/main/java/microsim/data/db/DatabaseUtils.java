@@ -296,22 +296,40 @@ public class DatabaseUtils {
             tx.rollback();
     }
 
+    /** Return whether the session-scoped output database factory is open. */
+    public static synchronized boolean isOutputInitialized() {
+        return outEntityManagerFactory != null && outEntityManagerFactory.isOpen();
+    }
+
+    /**
+     * Close the session-scoped output database factory and clear its configured
+     * URL. Normal model resets must not call this method; it is for JVM/session
+     * shutdown and test cleanup.
+     */
+    public static synchronized void closeOutputEntityManagerFactory() {
+        try {
+            if (outEntityManagerFactory != null && outEntityManagerFactory.isOpen()) {
+                outEntityManagerFactory.close();
+            }
+        } finally {
+            outEntityManagerFactory = null;
+            databaseOutputUrl = null;
+        }
+    }
+
     public static EntityManager getOutEntityManger() {
         return getOutEntityManger("sim-model-out");
     }
 
-    public static EntityManager getOutEntityManger(String persistenceUnitName) {
+    public static synchronized EntityManager getOutEntityManger(String persistenceUnitName) {
         if (SimulationEngine.getInstance().isTurnOffDatabaseConnection())
             return null;
 
-        if (outEntityManagerFactory == null) {
+        if (!isOutputInitialized()) {
             try {
-
-                // Create the EntityManagerFactory
                 var propertyMap = new HashMap<String, String>();
                 propertyMap.put("hibernate.connection.url", "jdbc:h2:file:" + DatabaseUtils.databaseOutputUrl);
                 outEntityManagerFactory = Persistence.createEntityManagerFactory(persistenceUnitName, propertyMap);
-
             } catch (Throwable ex) {
                 log.fatal("Initial EntityManagerFactory creation failed." + ex);
                 if (ex instanceof PersistenceException)
