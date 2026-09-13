@@ -115,15 +115,21 @@ public final class ParameterIntrospection {
         }
     }
 
-    public static void applyParameters(Class<?> clazz, Object instance, Map<String, Object> params, Consumer<String> warningLogger) {
+    /**
+     * Apply annotated experiment-builder parameters before engine setup. Fields
+     * belonging to other build targets are skipped here and validated after setup.
+     */
+    public static void applyParameters(Class<?> clazz, Object instance, Map<String, Object> params,
+            Consumer<String> warningLogger) {
         for (Map.Entry<String, Object> entry : params.entrySet()) {
             try {
                 Field field = clazz.getDeclaredField(entry.getKey());
+                if (!field.isAnnotationPresent(GUIparameter.class)) continue;
                 field.setAccessible(true);
                 field.set(instance, convertValue(field, entry.getValue()));
             } catch (NoSuchFieldException e) {
-                // Field not in this target, skip — legitimate when applying the same params
-                // map to both the model and the collector.
+                // Field not in this target: legitimate when the same parameter map
+                // will later be applied to the model and collector.
             } catch (Exception e) {
                 if (warningLogger != null) {
                     warningLogger.accept("applyParameters: failed to set '" + entry.getKey() + "': "
@@ -134,29 +140,32 @@ public final class ParameterIntrospection {
     }
 
     /**
-     * All-or-nothing parameter update against a single target. Validates every
-     * submitted parameter first (unknown names and un-coercible values are
-     * collected as errors); only if validation fully passes are any values
-     * written. Throws IllegalArgumentException listing all problems otherwise,
-     * leaving the target unmodified.
+     * Apply a live parameter update to one target. Every submitted name must be
+     * annotated with {@link GUIparameter} and permit runtime modification. The
+     * update is all-or-nothing.
      */
     public static void validateAndApplyParameters(Class<?> clazz, Object instance, Map<String, Object> params)
             throws IllegalAccessException {
-        validateAndApplyMatchingParameters(params, new ParameterTarget(clazz, instance));
+        validateAndApplyMatchingParameters(true, params, new ParameterTarget(clazz, instance));
     }
 
     /**
-     * All-or-nothing update across multiple possible targets. A submitted name is
-     * valid if it exists on at least one target; if it exists on more than one,
-     * every matching field is validated and then updated. Unknown names or any
-     * failed coercion abort the whole update before any field is changed.
+     * Apply build-time parameters across multiple possible targets. Only fields
+     * annotated with {@link GUIparameter} are configurable, but parameters marked
+     * non-runtime-modifiable remain valid during this pre-run build phase.
      */
     public static void validateAndApplyMatchingParameters(Map<String, Object> params, ParameterTarget... targets)
             throws IllegalAccessException {
+        validateAndApplyMatchingParameters(false, params, targets);
+    }
+
+    private static void validateAndApplyMatchingParameters(boolean runtimeOnly, Map<String, Object> params,
+            ParameterTarget... targets) throws IllegalAccessException {
         List<String> errors = new ArrayList<>();
         List<ResolvedField> resolved = new ArrayList<>();
         for (Map.Entry<String, Object> entry : params.entrySet()) {
-            boolean matched = false;
+            boolean foundField = false;
+            boolean matchedParameter = false;
             for (ParameterTarget target : targets) {
                 if (target == null || target.clazz == null) continue;
                 Field field;
@@ -165,7 +174,16 @@ public final class ParameterIntrospection {
                 } catch (NoSuchFieldException e) {
                     continue;
                 }
-                matched = true;
+                foundField = true;
+                GUIparameter annotation = field.getAnnotation(GUIparameter.class);
+                if (annotation == null) continue;
+
+                matchedParameter = true;
+                if (runtimeOnly && !annotation.runtimeModifiable()) {
+                    errors.add("parameter '" + entry.getKey() + "' cannot be modified at runtime");
+                    continue;
+                }
+
                 field.setAccessible(true);
                 try {
                     resolved.add(new ResolvedField(field, target.instance, convertValue(field, entry.getValue())));
@@ -173,8 +191,12 @@ public final class ParameterIntrospection {
                     errors.add("'" + entry.getKey() + "': " + e.getMessage());
                 }
             }
-            if (!matched) {
-                errors.add("unknown parameter '" + entry.getKey() + "'");
+            if (!matchedParameter) {
+                if (foundField) {
+                    errors.add("parameter '" + entry.getKey() + "' is not annotated with @GUIparameter");
+                } else {
+                    errors.add("unknown parameter '" + entry.getKey() + "'");
+                }
             }
         }
         if (!errors.isEmpty()) {

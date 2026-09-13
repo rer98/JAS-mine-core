@@ -43,6 +43,10 @@ public class ParameterIntrospectionTest {
         @GUIparameter(description = "mode parameter")
         public Mode mode = Mode.LOW;
 
+        @GUIparameter(description = "fixed parameter", runtimeModifiable = false)
+        public int fixedValue = 2;
+
+        public int internalValue = 3;
         public java.util.List<String> unsupported;
     }
 
@@ -103,6 +107,13 @@ public class ParameterIntrospectionTest {
         assertEquals("mode parameter", mode.get("description"));
         assertTrue((Boolean) mode.get("runtimeModifiable"));
         assertEquals(List.of("LOW", "HIGH"), mode.get("options"));
+
+        Map<String, Object> fixed = params.stream()
+            .filter(p -> p.get("name").equals("fixedValue"))
+            .findFirst()
+            .orElseThrow();
+        assertFalse((Boolean) fixed.get("runtimeModifiable"));
+        assertFalse(params.stream().anyMatch(p -> p.get("name").equals("internalValue")));
         assertFalse(params.stream().anyMatch(p -> p.get("name").equals("unsupported")));
     }
 
@@ -112,12 +123,16 @@ public class ParameterIntrospectionTest {
         List<String> warnings = new ArrayList<>();
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("intValue", 7);
+        params.put("fixedValue", 8);
+        params.put("internalValue", 9);
         params.put("missing", 1);
         params.put("boolValue", "not-a-bool");
 
         ParameterIntrospection.applyParameters(ParameterFixture.class, fixture, params, warnings::add);
 
         assertEquals(7, fixture.intValue);
+        assertEquals(8, fixture.fixedValue);
+        assertEquals(3, fixture.internalValue);
         assertFalse(fixture.boolValue);
         assertEquals(1, warnings.size());
         assertTrue(warnings.get(0).contains("boolValue"));
@@ -167,16 +182,50 @@ public class ParameterIntrospectionTest {
         }
         assertEquals(0.5, builder.setupRate, 0.000001);
         assertEquals(1, model.intValue);
+        assertEquals(2, model.fixedValue);
         assertFalse(collector.exportToCSV);
 
         params.remove("definitelyMissing");
+        params.put("fixedValue", 8);
         ParameterIntrospection.validateAndApplyMatchingParameters(params,
             new ParameterIntrospection.ParameterTarget(BuilderFixture.class, builder),
             new ParameterIntrospection.ParameterTarget(ParameterFixture.class, model),
             new ParameterIntrospection.ParameterTarget(CollectorFixture.class, collector));
         assertEquals(0.75, builder.setupRate, 0.000001);
         assertEquals(7, model.intValue);
+        assertEquals(8, model.fixedValue);
         assertTrue(collector.exportToCSV);
+    }
+
+
+    @Test
+    public void runtimeUpdateRejectsNonModifiableParameterWithoutPartialMutation() throws Exception {
+        ParameterFixture fixture = new ParameterFixture();
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("intValue", 7);
+        params.put("fixedValue", 9);
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> ParameterIntrospection.validateAndApplyParameters(
+                        ParameterFixture.class, fixture, params));
+
+        assertTrue(error.getMessage().contains("fixedValue"));
+        assertTrue(error.getMessage().contains("runtime"));
+        assertEquals(1, fixture.intValue);
+        assertEquals(2, fixture.fixedValue);
+    }
+
+    @Test
+    public void runtimeUpdateRejectsUnannotatedField() {
+        ParameterFixture fixture = new ParameterFixture();
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> ParameterIntrospection.validateAndApplyParameters(
+                        ParameterFixture.class, fixture, Map.of("internalValue", 9)));
+
+        assertTrue(error.getMessage().contains("internalValue"));
+        assertTrue(error.getMessage().contains("@GUIparameter"));
+        assertEquals(3, fixture.internalValue);
     }
 
     private Object convert(String fieldName, Object value) throws Exception {
