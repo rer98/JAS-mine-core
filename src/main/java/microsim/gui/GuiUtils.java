@@ -2,10 +2,13 @@ package microsim.gui;
 
 import java.awt.Dimension;
 import java.awt.Frame;
+import java.awt.GraphicsEnvironment;
 import java.awt.Rectangle;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.beans.PropertyVetoException;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import javax.swing.ImageIcon;
 import javax.swing.JDesktopPane;
@@ -18,6 +21,9 @@ import microsim.gui.shell.MicrosimShell;
 import microsim.gui.shell.SimulationWindow;
 
 public class GuiUtils {
+
+    private static final List<JInternalFrame> plotterRegistry = new CopyOnWriteArrayList<>();
+    private static volatile boolean webMode;
 
     public static class WindowGrabber extends WindowAdapter {
         private JInternalFrame frame;
@@ -51,6 +57,9 @@ public class GuiUtils {
      */
     public static ProbeFrame openProbe(Object on, String title,
             SimulationManager ownerModel) {
+        if (GraphicsEnvironment.isHeadless() || webMode) {
+            return null;
+        }
         ProbeFrame pf = new ProbeFrame(on, title);
         pf.setVisible(true);
 
@@ -72,6 +81,12 @@ public class GuiUtils {
     }
 
     public static void addWindow(Frame window) {
+        if (GraphicsEnvironment.isHeadless() || webMode) {
+            if (window instanceof JFrame frame) {
+                plotterRegistry.add(buildInternalFrame(frame));
+            }
+            return;
+        }
         if (MicrosimShell.currentShell == null)
             window.setVisible(true);
         else {
@@ -90,10 +105,18 @@ public class GuiUtils {
     }
 
     public static void addWindow(Frame window, int x, int y, int width, int height) {
-
+        if (GraphicsEnvironment.isHeadless() || webMode) {
+            if (window instanceof JFrame frame) {
+                plotterRegistry.add(buildInternalFrame(frame));
+            }
+        }
     }
 
     public static void addWindow(JInternalFrame window) {
+        if (GraphicsEnvironment.isHeadless() || webMode) {
+            plotterRegistry.add(window);
+            return;
+        }
 
         final JDesktopPane desk = MicrosimShell.currentShell.getJDesktopPane();
 
@@ -147,6 +170,10 @@ public class GuiUtils {
 
     public static void addWindow(JInternalFrame window, int x, int y,
             int width, int height) {
+        if (GraphicsEnvironment.isHeadless() || webMode) {
+            plotterRegistry.add(window);
+            return;
+        }
         // SimulationWindow win = new SimulationWindow(null, window.getTitle(),
         // window);
         // win.setDefaultPosition(window.getBounds());
@@ -174,4 +201,23 @@ public class GuiUtils {
         return intF;
     }
 
+    /** Enable or disable web-mode window handling. */
+    public static void setWebMode(boolean enabled) {
+        webMode = enabled;
+    }
+
+    /** Return whether web-mode window handling is enabled. */
+    public static boolean isWebMode() {
+        return webMode;
+    }
+
+    /** Return an immutable snapshot of chart windows registered for web rendering. */
+    public static List<JInternalFrame> getPlotterRegistry() {
+        return List.copyOf(plotterRegistry);
+    }
+
+    /** Remove all chart windows registered for web rendering. */
+    public static void clearRegistry() {
+        plotterRegistry.clear();
+    }
 }
