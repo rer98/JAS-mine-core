@@ -62,10 +62,10 @@
  *     shaping.</li>
  *
  *   <li><b>Parameter helpers</b>:
- *     {@link microsim.web.server.ParameterIntrospection},
- *     {@link microsim.web.server.ParameterResponseUtils}, and
- *     {@link microsim.web.server.ParameterUpdateLog} handle GUI parameter
- *     reflection/coercion, response shaping, and runtime update logging.</li>
+ *     {@link microsim.web.server.ParameterIntrospection} and
+ *     {@link microsim.web.server.ParameterResponseUtils} handle web parameter
+ *     reflection/coercion and response shaping. Shared initial snapshots and
+ *     later changes are recorded by {@link microsim.data.GUIParameterHistory}.</li>
  *
  *   <li><b>Logs and charts</b>:
  *     {@link microsim.web.server.SimulationLogBuffer} and

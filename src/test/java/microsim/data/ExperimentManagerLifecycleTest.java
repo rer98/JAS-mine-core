@@ -98,11 +98,21 @@ class ExperimentManagerLifecycleTest {
         assertEquals(firstRunDirectory.resolve("database/out").toString(), sessionDatabaseUrl);
         assertTrue(DatabaseUtils.isOutputInitialized());
         assertTrue(Files.exists(Path.of(sessionDatabaseUrl + ".mv.db")));
+        assertEquals(List.of(
+                GUIParameterHistory.HEADER,
+                "0.0," + ModelFixture.class.getCanonicalName() + ",value,1"),
+                Files.readAllLines(firstRunDirectory.resolve(GUIParameterHistory.FILE_NAME)));
+
 
         Experiment second = manager.createExperiment(null);
         second.runId = "run-b";
         second.setOutputFolder(secondRunDirectory.toString());
         second = manager.setupExperiment(second, new ModelFixture(2));
+
+        assertEquals(List.of(
+                GUIParameterHistory.HEADER,
+                "0.0," + ModelFixture.class.getCanonicalName() + ",value,2"),
+                Files.readAllLines(secondRunDirectory.resolve(GUIParameterHistory.FILE_NAME)));
 
         assertNotNull(second.id);
         assertNotEquals(first.id, second.id);
@@ -128,5 +138,25 @@ class ExperimentManagerLifecycleTest {
         assertFalse(DatabaseUtils.isOutputInitialized());
         assertNull(DatabaseUtils.databaseOutputUrl);
         assertNull(DatabaseUtils.databaseInputUrl);
+    }
+
+
+    @Test
+    void initialParameterHistoryIsWrittenWhenDatabasePersistenceIsDisabled() throws Exception {
+        manager.saveExperimentOnDatabase = false;
+        manager.copyInputFolderStructure = false;
+        Path runDirectory = temporaryDirectory.resolve("output/no-database");
+
+        Experiment experiment = manager.createExperiment(null);
+        experiment.runId = "no-database";
+        experiment.setOutputFolder(runDirectory.toString());
+        experiment = manager.setupExperiment(experiment, new ModelFixture(7));
+
+        assertNull(experiment.id);
+        assertFalse(DatabaseUtils.isOutputInitialized());
+        assertEquals(List.of(
+                GUIParameterHistory.HEADER,
+                "0.0," + ModelFixture.class.getCanonicalName() + ",value,7"),
+                Files.readAllLines(runDirectory.resolve(GUIParameterHistory.FILE_NAME)));
     }
 }

@@ -96,7 +96,7 @@ public class OutputFileResolverTest {
         Path run = Path.of("output", "20990104040404");
         Files.createDirectories(run);
         Path file = run.resolve("GUIparameters.csv");
-        Files.writeString(file, "simulationTime,parameter,value\n0,p,1\n");
+        Files.writeString(file, "time,component,parameter,value\n0,model,p,1\n");
         try {
             OutputFileResolver.Result res = OutputFileResolver.outputFile("20990104040404", "GUIparameters.csv");
             assertNotNull(res.runDir());

@@ -3,6 +3,7 @@ package microsim.web;
 import io.javalin.Javalin;
 import io.javalin.http.Context;
 
+import microsim.data.GUIParameterHistory;
 import microsim.data.db.DatabaseUtils;
 import microsim.engine.ExperimentBuilder;
 import microsim.engine.SimulationEngine;
@@ -18,7 +19,6 @@ import microsim.web.server.DatabaseRequestUtils;
 import microsim.web.server.PathSafety;
 import microsim.web.server.ParameterIntrospection;
 import microsim.web.server.ParameterResponseUtils;
-import microsim.web.server.ParameterUpdateLog;
 import microsim.web.server.ExportFileUtils;
 import microsim.web.server.ExportStreamingUtils;
 import microsim.web.server.InputFileUtils;
@@ -740,10 +740,12 @@ public class SimulationServer {
         }
     }
 
-    private static void writeParameterUpdate(Map<String, Object> params) {
+    private static void writeParameterChanges(List<GUIParameterHistory.ParameterValue> changes) {
+        if (changes.isEmpty()) return;
         try {
             String outputFolder = SimulationEngine.getInstance().getCurrentExperiment().getOutputFolder();
-            ParameterUpdateLog.append(new File(outputFolder), SimulationEngine.getInstance().getTime(), params);
+            GUIParameterHistory.appendChanges(new File(outputFolder),
+                    SimulationEngine.getInstance().getTime(), changes);
         } catch (Exception e) {
             System.out.println("Warning: could not write parameter update log: " + e.getMessage());
         }
@@ -798,16 +800,19 @@ public class SimulationServer {
             
             Map<String, Object> params = ctx.bodyAsClass(Map.class);
             if (params != null && !params.isEmpty()) {
+                List<GUIParameterHistory.ParameterValue> before =
+                        GUIParameterHistory.capture(model, params.keySet());
                 try {
-                    // All-or-nothing: validate every parameter against the model
-                    // before applying any. Runtime updates target the model only
-                    // (collector parameters are not changed mid-run).
+                    // Keep the existing web design: runtime updates target the
+                    // model parameters exposed by the Update Params modal.
                     ParameterIntrospection.validateAndApplyParameters(model.getClass(), model, params);
                 } catch (IllegalArgumentException e) {
                     ctx.status(400).json(Map.of("error", "Invalid parameter update: " + e.getMessage()));
                     return;
                 }
-                writeParameterUpdate(params);
+                List<GUIParameterHistory.ParameterValue> changes = GUIParameterHistory.changedValues(
+                        before, GUIParameterHistory.capture(model, params.keySet()));
+                writeParameterChanges(changes);
             }
             
             ctx.json(SimulationLifecycleResponses.simpleStatus("updated"));
