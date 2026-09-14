@@ -317,6 +317,38 @@ public class DatabaseUtils {
         }
     }
 
+    /**
+     * Close the input database factory and clear its configured URL. Normal model
+     * resets must not call this method; it is for JVM/session shutdown and tests.
+     */
+    public static synchronized void closeInputEntityManagerFactory() {
+        try {
+            if (entityManagerFactory != null && entityManagerFactory.isOpen()) {
+                entityManagerFactory.close();
+            }
+        } finally {
+            entityManagerFactory = null;
+            databaseInputUrl = null;
+        }
+    }
+
+    /** Close all JAS-mine database factories at JVM/session termination. */
+    public static synchronized void closeEntityManagerFactories() {
+        RuntimeException failure = null;
+        try {
+            closeInputEntityManagerFactory();
+        } catch (RuntimeException e) {
+            failure = e;
+        }
+        try {
+            closeOutputEntityManagerFactory();
+        } catch (RuntimeException e) {
+            if (failure == null) failure = e;
+            else failure.addSuppressed(e);
+        }
+        if (failure != null) throw failure;
+    }
+
     public static EntityManager getOutEntityManger() {
         return getOutEntityManger("sim-model-out");
     }

@@ -3,9 +3,10 @@ package microsim.web;
 import io.javalin.Javalin;
 import io.javalin.http.Context;
 
+import microsim.data.db.DatabaseUtils;
+import microsim.engine.ExperimentBuilder;
 import microsim.engine.SimulationEngine;
 import microsim.engine.SimulationManager;
-import microsim.engine.ExperimentBuilder;
 import microsim.gui.GuiUtils;
 import microsim.web.server.ApiErrors;
 import microsim.web.server.HardResetAuth;
@@ -1220,7 +1221,11 @@ public class SimulationServer {
     }
 
     private static void disposeSimulationStateForShutdown() {
-        disposeSimulationState(false);
+        try {
+            disposeSimulationState(false);
+        } finally {
+            DatabaseUtils.closeEntityManagerFactories();
+        }
     }
 
 
