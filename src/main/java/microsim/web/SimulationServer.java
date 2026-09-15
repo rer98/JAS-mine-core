@@ -75,7 +75,7 @@ public class SimulationServer {
     private static String experimentPackage;
     private static int serverPort;
     private static String corsAllowedHosts;
-    private static boolean allowDataExport = true;      // If not specified in webserver properties, default to true.
+    private static boolean detailedDataAccessAllowed = true;      // If not specified in webserver properties, default to true.
     private static boolean requiresAuth = false;        // Restricted deployed models require data-plane tokens.
     private static int dbQueryMaxRows = 5000;          // Max rows returned by DB Explorer queries; 0 disables the cap.
     private static int dbQueryTimeoutSeconds = 60;     // Max DB Explorer query execution time; 0 disables the timeout.
@@ -134,7 +134,7 @@ public class SimulationServer {
         experimentPackage = config.getExperimentPackage();
         serverPort = config.getServerPort();
         corsAllowedHosts = config.getCorsAllowedHosts();
-        allowDataExport = config.isAllowDataExport();
+        detailedDataAccessAllowed = config.isDetailedDataAccessAllowed();
         requiresAuth = config.isRequiresAuth();
         dbQueryMaxRows = config.getDbQueryMaxRows();
         dbQueryTimeoutSeconds = config.getDbQueryTimeoutSeconds();
@@ -214,7 +214,7 @@ public class SimulationServer {
             config.routes.get("/simulation/parameters", SimulationServer::handleParameters);
             config.routes.get("/simulation/current-params", SimulationServer::handleCurrentParams);
             config.routes.get("/simulation/parameters/history", SimulationServer::handleParameterHistory);
-            config.routes.get("/simulation/allow-export", SimulationServer::handleAllowExport);
+            config.routes.get("/simulation/detailed-data-access", SimulationServer::handleDetailedDataAccess);
             config.routes.get("/simulation/export/list", SimulationServer::handleExportList);
             config.routes.get("/simulation/charts", SimulationServer::handleCharts);
             config.routes.get("/simulation/readme", SimulationServer::handleReadme);
@@ -237,9 +237,8 @@ public class SimulationServer {
 
             // To access input directory
             config.routes.get("/simulation/input/list", SimulationServer::handleInputList);
-            // app.get("/simulation/input/download/{filename}", SimulationServer::handleInputDownload);
             config.routes.get("/simulation/input/download", SimulationServer::handleInputDownload);
-            config.routes.post("/simulation/input/upload/{filename}", SimulationServer::handleInputUpload);
+            config.routes.post("/simulation/input/upload", SimulationServer::handleInputUpload);
 
             // For database querying via JAS-mine Web
             config.routes.post("/simulation/db/query", SimulationServer::handleDbQuery);
@@ -539,7 +538,7 @@ public class SimulationServer {
     private static void handleDataDictionary(Context ctx) {
         try {
             if (!requireDataToken(ctx)) return;
-            if (!allowDataExport) {
+            if (!detailedDataAccessAllowed) {
                 ctx.status(403).json(Map.of("error", "Data dictionary access is disabled for this model"));
                 return;
             }
@@ -572,11 +571,11 @@ public class SimulationServer {
     }
 
 
-    private static void handleAllowExport(Context ctx) {
+    private static void handleDetailedDataAccess(Context ctx) {
         if (!requireDataToken(ctx)) return;
         lock.readLock().lock();
         try {
-            ctx.json(Map.of("allowed", allowDataExport));
+            ctx.json(Map.of("detailedDataAccessAllowed", detailedDataAccessAllowed));
         } finally {
             lock.readLock().unlock();
         }
@@ -585,8 +584,8 @@ public class SimulationServer {
     private static void handleExportList(Context ctx) {
         try {
             if (!requireDataToken(ctx)) return;
-            if (!allowDataExport) {
-                ctx.status(403).json(Map.of("error", "Data export is disabled for this model"));
+            if (!detailedDataAccessAllowed) {
+                ctx.status(403).json(Map.of("error", "Detailed output access is disabled for this model"));
                 return;
             }
             File outputDir = new File("output");
@@ -860,8 +859,8 @@ public class SimulationServer {
         boolean responseCommitted = false;
         try {
             if (!requireDataToken(ctx)) return;
-            if (!allowDataExport) {
-                ctx.status(403).json(Map.of("error", "Data export is disabled for this model"));
+            if (!detailedDataAccessAllowed) {
+                ctx.status(403).json(Map.of("error", "Detailed output access is disabled for this model"));
                 return;
             }
             String timestamp = ctx.queryParam("timestamp");
@@ -896,8 +895,8 @@ public class SimulationServer {
         boolean responseCommitted = false;
         try {
             if (!requireDataToken(ctx)) return;
-            if (!allowDataExport) {
-                ctx.status(403).json(Map.of("error", "Data export is disabled for this model"));
+            if (!detailedDataAccessAllowed) {
+                ctx.status(403).json(Map.of("error", "Detailed output access is disabled for this model"));
                 return;
             }
             String timestamp = ctx.queryParam("timestamp");
@@ -938,7 +937,7 @@ public class SimulationServer {
     private static void handleExportColumns(Context ctx) {
         try {
             if (!requireDataToken(ctx)) return;
-            if (!allowDataExport) { ctx.status(403).json(Map.of("error", "Data export is disabled for this model")); return; }
+            if (!detailedDataAccessAllowed) { ctx.status(403).json(Map.of("error", "Detailed output access is disabled for this model")); return; }
             String timestamp = ctx.queryParam("timestamp"), path = ctx.queryParam("path");
             File file = OutputFileResolver.tabularFile(timestamp, path);
             if (file == null) { ctx.status(404).json(Map.of("error", "CSV/TSV output file not found")); return; }
@@ -952,7 +951,7 @@ public class SimulationServer {
     private static void handleExportColumnSummary(Context ctx) {
         try {
             if (!requireDataToken(ctx)) return;
-            if (!allowDataExport) { ctx.status(403).json(Map.of("error", "Data export is disabled for this model")); return; }
+            if (!detailedDataAccessAllowed) { ctx.status(403).json(Map.of("error", "Detailed output access is disabled for this model")); return; }
             Map<String, Object> body = ctx.bodyAsClass(Map.class);
             File file = OutputFileResolver.tabularFile((String) body.get("timestamp"), (String) body.get("path"));
             if (file == null) { ctx.status(404).json(Map.of("error", "CSV/TSV output file not found")); return; }
@@ -972,7 +971,7 @@ public class SimulationServer {
     private static void handleExportSampleRows(Context ctx) {
         try {
             if (!requireDataToken(ctx)) return;
-            if (!allowDataExport) { ctx.status(403).json(Map.of("error", "Data export is disabled for this model")); return; }
+            if (!detailedDataAccessAllowed) { ctx.status(403).json(Map.of("error", "Detailed output access is disabled for this model")); return; }
             Map<String, Object> body = ctx.bodyAsClass(Map.class);
             File file = OutputFileResolver.tabularFile((String) body.get("timestamp"), (String) body.get("path"));
             if (file == null) { ctx.status(404).json(Map.of("error", "CSV/TSV output file not found")); return; }
@@ -988,8 +987,8 @@ public class SimulationServer {
     private static void handleExportFindRows(Context ctx) {
         try {
             if (!requireDataToken(ctx)) return;
-            if (!allowDataExport) {
-                ctx.status(403).json(Map.of("error", "Data export is disabled for this model"));
+            if (!detailedDataAccessAllowed) {
+                ctx.status(403).json(Map.of("error", "Detailed output access is disabled for this model"));
                 return;
             }
             Map<String, Object> body = ctx.bodyAsClass(Map.class);
@@ -1027,13 +1026,13 @@ public class SimulationServer {
     /**
      * Row-aware chunking for tabular output files (primarily CSV/TSV). Streams the
      * file and returns only the requested window of rows, so very large files never
-     * need to be transferred whole. Honours allowDataExport and the data token.
+     * need to be transferred whole. Honours allowDetailedDataAccess and the data token.
      */
     private static void handleExportRows(Context ctx) {
         try {
             if (!requireDataToken(ctx)) return;
-            if (!allowDataExport) {
-                ctx.status(403).json(Map.of("error", "Data export is disabled for this model"));
+            if (!detailedDataAccessAllowed) {
+                ctx.status(403).json(Map.of("error", "Detailed output access is disabled for this model"));
                 return;
             }
             String timestamp = ctx.queryParam("timestamp");
@@ -1071,11 +1070,21 @@ public class SimulationServer {
 
 
 
-    // Handle user interacting with input directory online
+    // Handle user interaction with the model input hierarchy.
     private static void handleInputList(Context ctx) {
         try {
             if (!requireDataToken(ctx)) return;
-            ctx.json(Map.of("files", InputFileUtils.listVisibleInputFiles(new File("input"))));
+            String path = ctx.queryParam("path");
+            boolean recursive = "true".equalsIgnoreCase(ctx.queryParam("recursive"));
+            List<Map<String, Object>> files = recursive
+                ? InputFileUtils.listVisibleInputFilesRecursively(new File("input"))
+                : InputFileUtils.listVisibleInputEntries(new File("input"), path);
+            ctx.json(Map.of(
+                "path", path == null ? "" : path,
+                "files", files
+            ));
+        } catch (IllegalArgumentException e) {
+            ctx.status(400).json(Map.of("error", e.getMessage()));
         } catch (Exception e) {
             ApiErrors.handleError(ctx, e, DIAGNOSTIC_SINK);
         }
@@ -1086,27 +1095,28 @@ public class SimulationServer {
         boolean responseCommitted = false;
         try {
             if (!requireDataToken(ctx)) return;
-            String filename = ctx.queryParam("filename");
-            if (filename == null || filename.isEmpty()) {
-                ctx.status(400).json(Map.of("error", "Missing filename parameter"));
+            String path = ctx.queryParam("path");
+            if (path == null || path.isEmpty()) {
+                ctx.status(400).json(Map.of("error", "Missing path parameter"));
                 return;
             }
-            File file = InputFileUtils.resolveInputFile(filename);
+            File file = InputFileUtils.resolveInputFile(path);
             if (file == null) {
-                ctx.status(400).json(Map.of("error", "Invalid filename"));
+                ctx.status(400).json(Map.of("error", "Invalid input file path"));
                 return;
             }
-            if (!file.exists()) {
-                ctx.status(404).json(Map.of("error", "File not found"));
+            if (!file.exists() || !file.isFile()) {
+                ctx.status(404).json(Map.of("error", "Input file not found"));
                 return;
             }
-            // Block download of non-Excel files (such as proprietary databases) if export not allowed
-            if (!allowDataExport && !InputFileUtils.isExcelFile(filename)) {
-                ctx.status(403).json(Map.of("error", "Only Excel files can be downloaded for this model"));
+            if (!InputFileUtils.isAllowedByDetailedDataPolicy(file.getName(), detailedDataAccessAllowed)) {
+                ctx.status(403).json(Map.of("error", "Only Excel input files are accessible for this model"));
                 return;
             }
             responseCommitted = true;
-            ExportStreamingUtils.streamSingleFile(ctx, file, filename, ctx.queryParam("zip"), SINGLE_FILE_ZIP_THRESHOLD_BYTES);
+            ExportStreamingUtils.streamSingleFile(
+                ctx, file, file.getName(), ctx.queryParam("zip"), SINGLE_FILE_ZIP_THRESHOLD_BYTES
+            );
         } catch (IllegalArgumentException e) {
             if (responseCommitted) {
                 addLogMessage("Input download failed mid-stream: " + e.getMessage());
@@ -1121,6 +1131,8 @@ public class SimulationServer {
             }
         }
     }
+
+
     private static void handleInputUpload(Context ctx) {
         if (!requireDataToken(ctx)) return;
         lock.writeLock().lock();
@@ -1130,25 +1142,31 @@ public class SimulationServer {
                 return;
             }
 
-            String filename = ctx.pathParam("filename");
-            // Prevent path traversal
-            File file = InputFileUtils.resolveInputFile(filename);
+            String path = ctx.queryParam("path");
+            if (path == null || path.isEmpty()) {
+                ctx.status(400).json(Map.of("error", "Missing path parameter"));
+                return;
+            }
+            File file = InputFileUtils.resolveInputFile(path);
             if (file == null) {
-                ctx.status(400).json(Map.of("error", "Invalid filename"));
+                ctx.status(400).json(Map.of("error", "Invalid input file path"));
                 return;
             }
-            // Reject filenames that don't match an existing input file
-            if (!file.exists()) {
-                ctx.status(400).json(Map.of("error", "Filename does not match any existing input file"));
+            if (!file.exists() || !file.isFile()) {
+                ctx.status(400).json(Map.of("error", "Path does not match an existing input file"));
                 return;
             }
-            
+            if (!InputFileUtils.isAllowedByDetailedDataPolicy(file.getName(), detailedDataAccessAllowed)) {
+                ctx.status(403).json(Map.of("error", "Only Excel input files can be uploaded for this model"));
+                return;
+            }
+
             try (java.io.InputStream in = ctx.bodyInputStream()) {
                 InputFileUtils.replaceInputFile(file, in);
             }
-            // Invalidate parameter cache: an uploaded input file may change @GUIparameter defaults
+            // An uploaded input file may change @GUIparameter defaults.
             cachedParameters = null;
-            ctx.json(Map.of("status", "uploaded", "filename", filename));
+            ctx.json(Map.of("status", "uploaded", "path", path));
         } catch (IllegalArgumentException e) {
             ctx.status(400).json(Map.of("error", e.getMessage()));
         } catch (Exception e) {
@@ -1162,7 +1180,7 @@ public class SimulationServer {
     // To allow database querying via JAS-mine Web
     private static void handleDbQuery(Context ctx) {
         if (!requireDataToken(ctx)) return;
-        if (!allowDataExport) {
+        if (!detailedDataAccessAllowed) {
             ctx.status(403).json(Map.of("error", "Database access is not allowed for this model"));
             return;
         }

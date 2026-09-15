@@ -19,8 +19,8 @@ import org.junit.jupiter.api.Test;
 /* (C) Copyright 2026, by Ross Richardson
  *
  * Unit tests for InputFileUtils.
- * Verifies the focused JAS-mine Web helper behaviour implemented by InputFileUtils
- * so SimulationServer can delegate that concern without changing endpoint contracts.
+ * Verifies safe hierarchical input browsing, detailed-data policy decisions,
+ * and atomic direct or zipped file replacement.
  *
  * @author ross richardson
  *
@@ -37,19 +37,73 @@ public class InputFileUtilsTest {
     }
 
     @Test
-    public void listVisibleInputFilesSortsAndSkipsDotFiles() throws Exception {
-        Path dir = Files.createTempDirectory("input-file-utils-list");
-        Files.writeString(dir.resolve("b.txt"), "bb", StandardCharsets.UTF_8);
-        Files.writeString(dir.resolve("A.xlsx"), "a", StandardCharsets.UTF_8);
-        Files.writeString(dir.resolve(".hidden"), "hidden", StandardCharsets.UTF_8);
+    public void detailedDataPolicyAlwaysAllowsExcelAndOtherwiseFollowsSetting() {
+        assertTrue(InputFileUtils.isAllowedByDetailedDataPolicy("scenario.xlsx", false));
+        assertTrue(InputFileUtils.isAllowedByDetailedDataPolicy("scenario.xls", false));
+        assertFalse(InputFileUtils.isAllowedByDetailedDataPolicy("input.mv.db", false));
+        assertFalse(InputFileUtils.isAllowedByDetailedDataPolicy("population.csv", false));
+        assertTrue(InputFileUtils.isAllowedByDetailedDataPolicy("input.mv.db", true));
+        assertTrue(InputFileUtils.isAllowedByDetailedDataPolicy("population.csv", true));
+    }
 
-        List<Map<String, Object>> files = InputFileUtils.listVisibleInputFiles(dir.toFile());
+    @Test
+    public void directoryListingSeparatesDirectoriesAndFilesWithRelativePaths() throws Exception {
+        Path root = Files.createTempDirectory("input-file-utils-list");
+        Path nested = Files.createDirectories(root.resolve("EUROMODoutput/training"));
+        Files.writeString(root.resolve("b.txt"), "bb", StandardCharsets.UTF_8);
+        Files.writeString(root.resolve("A.xlsx"), "a", StandardCharsets.UTF_8);
+        Files.writeString(root.resolve(".hidden"), "hidden", StandardCharsets.UTF_8);
+        Files.writeString(nested.resolve("policy.xlsx"), "policy", StandardCharsets.UTF_8);
 
-        assertEquals(2, files.size());
-        assertEquals("A.xlsx", files.get(0).get("name"));
-        assertEquals("excel", files.get(0).get("type"));
-        assertEquals("b.txt", files.get(1).get("name"));
-        assertEquals("other", files.get(1).get("type"));
+        List<Map<String, Object>> rootEntries = InputFileUtils.listVisibleInputEntries(root.toFile(), "");
+        List<Map<String, Object>> nestedEntries = InputFileUtils.listVisibleInputEntries(root.toFile(), "EUROMODoutput/training");
+
+        assertEquals(List.of("EUROMODoutput", "A.xlsx", "b.txt"), rootEntries.stream().map(e -> e.get("name")).toList());
+        assertEquals("directory", rootEntries.get(0).get("kind"));
+        assertEquals("EUROMODoutput", rootEntries.get(0).get("path"));
+        assertEquals("file", rootEntries.get(1).get("kind"));
+        assertEquals("excel", rootEntries.get(1).get("type"));
+        assertEquals("EUROMODoutput/training/policy.xlsx", nestedEntries.get(0).get("path"));
+    }
+
+    @Test
+    public void recursiveListingReturnsFilesOnlyAndSkipsHiddenTreesAndSymlinks() throws Exception {
+        Path root = Files.createTempDirectory("input-file-utils-recursive");
+        Path visible = Files.createDirectories(root.resolve("visible/nested"));
+        Path hidden = Files.createDirectories(root.resolve(".hidden"));
+        Files.writeString(root.resolve("root.xlsx"), "root", StandardCharsets.UTF_8);
+        Files.writeString(visible.resolve("data.txt"), "data", StandardCharsets.UTF_8);
+        Files.writeString(hidden.resolve("secret.txt"), "secret", StandardCharsets.UTF_8);
+        try {
+            Files.createSymbolicLink(root.resolve("linked"), visible);
+        } catch (UnsupportedOperationException | java.io.IOException | SecurityException ignored) {
+            // Symlink creation may be unavailable on some test platforms.
+        }
+
+        List<Map<String, Object>> files = InputFileUtils.listVisibleInputFilesRecursively(root.toFile());
+
+        assertEquals(List.of("root.xlsx", "visible/nested/data.txt"), files.stream().map(e -> e.get("path")).toList());
+        assertTrue(files.stream().allMatch(e -> "file".equals(e.get("kind"))));
+    }
+
+    @Test
+    public void nestedPathResolutionAllowsVisibleDescendantsAndRejectsTraversalOrHiddenPaths() throws Exception {
+        Path root = Files.createTempDirectory("input-file-utils-path");
+        Path file = Files.createDirectories(root.resolve("subdir")).resolve("config.xls");
+        Files.writeString(file, "contents", StandardCharsets.UTF_8);
+        Files.writeString(root.resolve(".hidden.xls"), "hidden", StandardCharsets.UTF_8);
+
+        assertEquals(file.toFile().getCanonicalFile(), InputFileUtils.resolveInputPath(root.toFile(), "subdir/config.xls").getCanonicalFile());
+        assertNull(InputFileUtils.resolveInputPath(root.toFile(), "../secret.xls"));
+        assertNull(InputFileUtils.resolveInputPath(root.toFile(), "/tmp/secret.xls"));
+        assertNull(InputFileUtils.resolveInputPath(root.toFile(), ".hidden.xls"));
+        Path link = root.resolve("linked.xls");
+        try {
+            Files.createSymbolicLink(link, file);
+            assertNull(InputFileUtils.resolveInputPath(root.toFile(), "linked.xls"));
+        } catch (UnsupportedOperationException | java.io.IOException | SecurityException ignored) {
+            // Symlink creation may be unavailable on some test platforms.
+        }
     }
 
     @Test
@@ -86,24 +140,6 @@ public class InputFileUtilsTest {
         assertEquals("old", Files.readString(target, StandardCharsets.UTF_8));
     }
 
-
-    @Test
-    public void resolveInputFileValidatesTraversalButAllowsMissingExistingChecksUpstream() throws Exception {
-        Path input = Path.of("input");
-        Files.createDirectories(input);
-        Path file = input.resolve("config.xls");
-        Files.writeString(file, "contents", StandardCharsets.UTF_8);
-        try {
-            assertEquals(file.toFile().getCanonicalFile(), InputFileUtils.resolveInputFile("config.xls").getCanonicalFile());
-            File missing = InputFileUtils.resolveInputFile("missing.xls");
-            assertNotNull(missing);
-            assertFalse(missing.exists());
-            assertNull(InputFileUtils.resolveInputFile("../secret.xls"));
-        } finally {
-            Files.deleteIfExists(file);
-            Files.deleteIfExists(input);
-        }
-    }
     private static void assertBadZip(Path target, byte[] zipBytes, String message) throws Exception {
         try {
             InputFileUtils.replaceInputFile(target.toFile(), new ByteArrayInputStream(zipBytes));

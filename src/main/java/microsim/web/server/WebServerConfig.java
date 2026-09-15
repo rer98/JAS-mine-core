@@ -23,7 +23,7 @@ public final class WebServerConfig {
     private final String experimentPackage;
     private final int serverPort;
     private final String corsAllowedHosts;
-    private final boolean allowDataExport;
+    private final boolean detailedDataAccessAllowed;
     private final boolean requiresAuth;
     private final int dbQueryMaxRows;
     private final int dbQueryTimeoutSeconds;
@@ -42,7 +42,7 @@ public final class WebServerConfig {
             String experimentPackage,
             int serverPort,
             String corsAllowedHosts,
-            boolean allowDataExport,
+            boolean detailedDataAccessAllowed,
             boolean requiresAuth,
             int dbQueryMaxRows,
             int dbQueryTimeoutSeconds,
@@ -55,7 +55,7 @@ public final class WebServerConfig {
         this.experimentPackage = experimentPackage;
         this.serverPort = serverPort;
         this.corsAllowedHosts = corsAllowedHosts;
-        this.allowDataExport = allowDataExport;
+        this.detailedDataAccessAllowed = detailedDataAccessAllowed;
         this.requiresAuth = requiresAuth;
         this.dbQueryMaxRows = dbQueryMaxRows;
         this.dbQueryTimeoutSeconds = dbQueryTimeoutSeconds;
@@ -88,7 +88,12 @@ public final class WebServerConfig {
         int dbQueryMaxRows = parseNonNegativeIntSetting(props, env, "db.query.maxRows", "DB_QUERY_MAX_ROWS", 5000, Integer.MAX_VALUE - 1);
         int dbQueryTimeoutSeconds = parseNonNegativeIntSetting(props, env, "db.query.timeoutSeconds", "DB_QUERY_TIMEOUT_SECONDS", 60);
         String corsAllowedHosts = props.getProperty("cors.allowed.hosts", "http://localhost:5001");
-        boolean allowDataExport = Boolean.parseBoolean(props.getProperty("allowDataExport", "true"));
+        if (props.containsKey("allowDataExport")) {
+            throw new IllegalArgumentException(
+                "allowDataExport has been renamed to allowDetailedDataAccess in webserver.properties"
+            );
+        }
+        boolean detailedDataAccessAllowed = Boolean.parseBoolean(props.getProperty("allowDetailedDataAccess", "true"));
 
         String modelId = env.get("MODEL_ID");
         if (modelId == null || modelId.trim().isEmpty()) {
@@ -123,7 +128,7 @@ public final class WebServerConfig {
             experimentPackage,
             serverPort,
             corsAllowedHosts,
-            allowDataExport,
+            detailedDataAccessAllowed,
             requiresAuth,
             dbQueryMaxRows,
             dbQueryTimeoutSeconds,
@@ -144,6 +149,7 @@ public final class WebServerConfig {
         System.out.println("  DB query timeout seconds: " + dbQueryTimeoutSeconds);
         System.out.println("  Port: " + serverPort);
         System.out.println("  CORS allowed hosts: " + corsAllowedHosts);
+        System.out.println("  Detailed data access allowed: " + detailedDataAccessAllowed);
     }
 
     private static int parsePort(String portStr) {
@@ -188,7 +194,7 @@ public final class WebServerConfig {
     public String getExperimentPackage() { return experimentPackage; }
     public int getServerPort() { return serverPort; }
     public String getCorsAllowedHosts() { return corsAllowedHosts; }
-    public boolean isAllowDataExport() { return allowDataExport; }
+    public boolean isDetailedDataAccessAllowed() { return detailedDataAccessAllowed; }
     public boolean isRequiresAuth() { return requiresAuth; }
     public int getDbQueryMaxRows() { return dbQueryMaxRows; }
     public int getDbQueryTimeoutSeconds() { return dbQueryTimeoutSeconds; }

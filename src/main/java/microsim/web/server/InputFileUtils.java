@@ -19,34 +19,86 @@ import java.util.zip.ZipInputStream;
 /* (C) Copyright 2026, by Ross Richardson
  *
  * Input-file helpers for JAS-mine Web model inputs.
- * Safely resolves input paths, lists visible input files, classifies file types,
- * and replaces direct or zipped input files atomically before Build.
+ * Safely resolves nested input paths, lists visible files and directories,
+ * classifies file types, and replaces direct or zipped files atomically before Build.
  *
  * @author ross richardson
  *
  */
 
-/** Utility methods for listing, classifying, and atomically replacing simulation input files. */
+/** Utility methods for browsing, classifying, and atomically replacing simulation input files. */
 public final class InputFileUtils {
     private InputFileUtils() {}
 
-    public static List<Map<String, Object>> listVisibleInputFiles(File inputDir) {
-        List<Map<String, Object>> fileList = new ArrayList<>();
-        if (!inputDir.exists()) return fileList;
+    public static List<Map<String, Object>> listVisibleInputEntries(File inputRoot, String relativePath) throws IOException {
+        File root = inputRoot.getCanonicalFile();
+        File directory = resolveInputDirectory(root, relativePath);
+        List<Map<String, Object>> entries = new ArrayList<>();
+        File[] children = directory.listFiles();
+        if (children == null) return entries;
 
-        File[] files = inputDir.listFiles();
-        if (files == null) return fileList;
-
-        Arrays.sort(files, Comparator.comparing(File::getName, String.CASE_INSENSITIVE_ORDER));
-        for (File f : files) {
-            if (f.getName().startsWith(".")) continue;
-            fileList.add(Map.of(
-                "name", f.getName(),
-                "size", f.length(),
-                "type", classifyInputFile(f.getName())
-            ));
+        Arrays.sort(children, Comparator
+            .comparing((File file) -> !file.isDirectory())
+            .thenComparing(File::getName, String.CASE_INSENSITIVE_ORDER));
+        for (File child : children) {
+            if (!isVisibleEntry(root, child)) continue;
+            entries.add(inputEntry(root, child));
         }
-        return fileList;
+        return entries;
+    }
+
+    public static List<Map<String, Object>> listVisibleInputFilesRecursively(File inputRoot) throws IOException {
+        File root = inputRoot.getCanonicalFile();
+        List<Map<String, Object>> files = new ArrayList<>();
+        if (!root.exists() || !root.isDirectory()) return files;
+        collectVisibleFiles(root, root, files);
+        files.sort(Comparator.comparing(entry -> (String) entry.get("path"), String.CASE_INSENSITIVE_ORDER));
+        return files;
+    }
+
+    private static void collectVisibleFiles(File root, File directory, List<Map<String, Object>> files) throws IOException {
+        File[] children = directory.listFiles();
+        if (children == null) return;
+        Arrays.sort(children, Comparator.comparing(File::getName, String.CASE_INSENSITIVE_ORDER));
+        for (File child : children) {
+            if (!isVisibleEntry(root, child)) continue;
+            if (child.isDirectory()) collectVisibleFiles(root, child, files);
+            else if (child.isFile()) files.add(inputEntry(root, child));
+        }
+    }
+
+    private static File resolveInputDirectory(File root, String relativePath) throws IOException {
+        if (relativePath == null || relativePath.isBlank()) {
+            if (!root.exists() || !root.isDirectory()) {
+                throw new IllegalArgumentException("Input directory not found");
+            }
+            return root;
+        }
+        File resolved = resolveInputPath(root, relativePath);
+        if (resolved == null) throw new IllegalArgumentException("Invalid input directory path");
+        if (!resolved.exists() || !resolved.isDirectory()) {
+            throw new IllegalArgumentException("Input directory not found");
+        }
+        return resolved;
+    }
+
+    private static boolean isVisibleEntry(File root, File entry) throws IOException {
+        if (entry.getName().startsWith(".") || Files.isSymbolicLink(entry.toPath())) return false;
+        File canonical = entry.getCanonicalFile();
+        return canonical.toPath().startsWith(root.toPath()) && (canonical.isFile() || canonical.isDirectory());
+    }
+
+    private static Map<String, Object> inputEntry(File root, File entry) throws IOException {
+        String path = root.toPath().relativize(entry.getCanonicalFile().toPath()).toString()
+            .replace(File.separatorChar, '/');
+        boolean directory = entry.isDirectory();
+        return Map.of(
+            "name", entry.getName(),
+            "path", path,
+            "kind", directory ? "directory" : "file",
+            "type", directory ? "directory" : classifyInputFile(entry.getName()),
+            "size", directory ? 0L : entry.length()
+        );
     }
 
     public static String classifyInputFile(String filename) {
@@ -61,8 +113,27 @@ public final class InputFileUtils {
         return lower.endsWith(".xls") || lower.endsWith(".xlsx");
     }
 
-    public static File resolveInputFile(String filename) throws IOException {
-        return PathSafety.safeResolve("input", filename);
+    public static boolean isAllowedByDetailedDataPolicy(String filename, boolean detailedDataAccessAllowed) {
+        return detailedDataAccessAllowed || isExcelFile(filename);
+    }
+
+    public static File resolveInputPath(File inputRoot, String relativePath) throws IOException {
+        File root = inputRoot.getCanonicalFile();
+        File resolved = PathSafety.safeResolveDescendant(root, relativePath);
+        if (resolved == null) return null;
+
+        Path current = root.toPath();
+        for (Path segment : Path.of(relativePath)) {
+            String name = segment.toString();
+            if (name.startsWith(".")) return null;
+            current = current.resolve(name);
+            if (Files.isSymbolicLink(current)) return null;
+        }
+        return resolved;
+    }
+
+    public static File resolveInputFile(String relativePath) throws IOException {
+        return resolveInputPath(new File("input"), relativePath);
     }
 
     public static void replaceInputFile(File target, InputStream in) throws IOException {

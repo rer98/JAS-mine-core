@@ -29,7 +29,7 @@ public class WebServerConfigTest {
         assertEquals("experiment", cfg.getExperimentPackage());
         assertEquals(7070, cfg.getServerPort());
         assertEquals("http://localhost:5001", cfg.getCorsAllowedHosts());
-        assertTrue(cfg.isAllowDataExport());
+        assertTrue(cfg.isDetailedDataAccessAllowed());
         assertFalse(cfg.isRequiresAuth());
         assertEquals(5000, cfg.getDbQueryMaxRows());
         assertEquals(60, cfg.getDbQueryTimeoutSeconds());
@@ -48,7 +48,7 @@ public class WebServerConfigTest {
         props.setProperty("experiment.package", "e");
         props.setProperty("server.port", "9090");
         props.setProperty("cors.allowed.hosts", "http://example.test");
-        props.setProperty("allowDataExport", "false");
+        props.setProperty("allowDetailedDataAccess", "false");
         props.setProperty("model.id", "model-from-props");
         props.setProperty("sim.id", "sim-from-props");
         props.setProperty("hardReset.secret", "props-hard-reset");
@@ -69,7 +69,7 @@ public class WebServerConfigTest {
         assertEquals("e", cfg.getExperimentPackage());
         assertEquals(9090, cfg.getServerPort());
         assertEquals("http://example.test", cfg.getCorsAllowedHosts());
-        assertFalse(cfg.isAllowDataExport());
+        assertFalse(cfg.isDetailedDataAccessAllowed());
         assertTrue(cfg.isRequiresAuth());
         assertEquals(456, cfg.getDbQueryMaxRows());
         assertEquals(8, cfg.getDbQueryTimeoutSeconds());
@@ -127,6 +127,16 @@ public class WebServerConfigTest {
         props = baseProps();
         props.setProperty("db.query.maxRows", Integer.toString(Integer.MAX_VALUE));
         assertBadConfig(props, "Invalid DB_QUERY_MAX_ROWS / db.query.maxRows value '2147483647' - must be no greater than 2147483646");
+    }
+
+    @Test
+    public void rejectsRenamedDetailedDataProperty() {
+        Properties props = baseProps();
+        props.setProperty("allowDataExport", "false");
+        assertBadConfig(
+            props,
+            "allowDataExport has been renamed to allowDetailedDataAccess in webserver.properties"
+        );
     }
 
     private static Properties baseProps() {
