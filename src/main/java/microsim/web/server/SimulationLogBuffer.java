@@ -104,7 +104,7 @@ public class SimulationLogBuffer {
         }
 
         return Map.of(
-            "logs", newLogs,
+            "logs", redactLogLines(newLogs),
             "firstIndex", first,
             "nextIndex", first + logs.length
         );

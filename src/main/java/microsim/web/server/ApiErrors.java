@@ -2,37 +2,67 @@ package microsim.web.server;
 
 import io.javalin.http.Context;
 
+import java.io.PrintStream;
+import java.time.Instant;
 import java.util.Map;
+import java.util.UUID;
 
 
 /* (C) Copyright 2026, by Ross Richardson
  *
  * Shared JSON error response helpers for JAS-mine Web API endpoints.
- * Contains helpers for building standard error response bodies, selecting exception messages,
- * and writing JSON errors through Javalin contexts.
+ * Keeps unexpected exception details in a private diagnostic sink while returning
+ * a browser-safe message and incident identifier.
  *
  * @author ross richardson
  *
  */
 
-/** Shared JSON error response helpers for API endpoints. */
+/** Shared JSON response and private-diagnostic helpers for API errors. */
 public final class ApiErrors {
+    public static final String INTERNAL_ERROR_MESSAGE = "The simulation encountered an internal error.";
+
     private ApiErrors() {}
 
     public static Map<String, String> errorBody(String message) {
         return Map.of("error", message);
     }
 
-    public static String messageFor(Exception e) {
-        return e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+    public static Map<String, String> internalErrorBody(String errorId) {
+        return Map.of(
+            "error", INTERNAL_ERROR_MESSAGE,
+            "errorId", errorId
+        );
     }
 
     public static void jsonError(Context ctx, int status, String message) {
         ctx.status(status).json(errorBody(message));
     }
 
-    public static void handleError(Context ctx, Exception e, boolean logStackTrace) {
-        if (logStackTrace) e.printStackTrace();
-        jsonError(ctx, 500, messageFor(e));
+    public static void handleError(Context ctx, Exception error, PrintStream diagnosticSink) {
+        String path;
+        try {
+            path = ctx.path();
+        } catch (RuntimeException ignored) {
+            path = "<unavailable>";
+        }
+        String errorId = reportDiagnostic(diagnosticSink, "path=" + path, error);
+        ctx.status(500).json(internalErrorBody(errorId));
+    }
+
+    public static String reportDiagnostic(PrintStream diagnosticSink, String context, Throwable error) {
+        String errorId = UUID.randomUUID().toString();
+        writeDiagnostic(diagnosticSink, errorId, context, error);
+        return errorId;
+    }
+
+    static void writeDiagnostic(PrintStream diagnosticSink, String errorId, String context, Throwable error) {
+        if (diagnosticSink == null) return;
+        diagnosticSink.printf(
+            "%s [JAS-mine Web internal error] errorId=%s %s%n",
+            Instant.now(), errorId, context
+        );
+        error.printStackTrace(diagnosticSink);
+        diagnosticSink.flush();
     }
 }

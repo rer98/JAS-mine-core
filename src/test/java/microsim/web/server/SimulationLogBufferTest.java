@@ -33,4 +33,21 @@ public class SimulationLogBufferTest {
         assertEquals("20260703084523", tail.get("outputRun"));
         assertEquals(3, ((List<?>) tail.get("lines")).size());
     }
+    @Test
+    public void pollRedactsSecretsWithoutChangingCursor() {
+        SimulationLogBuffer logs = new SimulationLogBuffer(100);
+        logs.add("ordinary line");
+        logs.add("password=hunter2");
+        logs.add("Bearer abc.def");
+
+        Map<String, Object> poll = logs.poll(0);
+
+        assertEquals(
+            List.of("ordinary line", "password=[REDACTED]", "Bearer [REDACTED]"),
+            poll.get("logs")
+        );
+        assertEquals(0L, poll.get("firstIndex"));
+        assertEquals(3L, poll.get("nextIndex"));
+    }
+
 }

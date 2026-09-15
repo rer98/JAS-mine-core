@@ -35,8 +35,6 @@ import microsim.web.server.WebServerConfig;
 import microsim.web.server.SqlSafety;
 
 import java.io.PrintStream;
-import java.io.PrintWriter;
-import java.io.StringWriter;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -120,6 +118,7 @@ public class SimulationServer {
     private static final long SHUTDOWN_LOCK_TIMEOUT_MILLIS = 2_000L;
 
     private static final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
+    private static final PrintStream DIAGNOSTIC_SINK = System.err;
     private static final SimulationLogBuffer logs = new SimulationLogBuffer(SimulationLogBuffer.DEFAULT_MAX_LINES);
     private static final MemoryMonitor memoryMonitor = new MemoryMonitor(SimulationServer::addLogMessage);
 
@@ -155,19 +154,15 @@ public class SimulationServer {
         GuiUtils.setWebMode(true);
 
         PrintStream originalOut = System.out;
-        PrintStream originalErr = System.err;
 
         System.setOut(new PrintStream(logs.capturingOutputStream(originalOut), true, StandardCharsets.UTF_8));
-        System.setErr(new PrintStream(logs.capturingOutputStream(originalErr), true, StandardCharsets.UTF_8));
+        System.setErr(new PrintStream(logs.capturingOutputStream(DIAGNOSTIC_SINK), true, StandardCharsets.UTF_8));
 
         Thread.setDefaultUncaughtExceptionHandler((thread, throwable) -> {
-            StringWriter sw = new StringWriter();
-            throwable.printStackTrace(new PrintWriter(sw));
-            for (String line : sw.toString().split("\n")) {
-                addLogMessage("[EXCEPTION] " + line);
-            }
-            originalErr.println("Uncaught exception in thread " + thread.getName());
-            throwable.printStackTrace(originalErr);
+            String errorId = ApiErrors.reportDiagnostic(
+                DIAGNOSTIC_SINK, "thread=" + thread.getName(), throwable
+            );
+            addLogMessage("[ERROR] An internal error occurred. Reference: " + errorId);
         });
 
         System.out.println("\n\n========== JAS-MINE WEB SERVER STARTING ==========\n");
@@ -395,7 +390,7 @@ public class SimulationServer {
                 engine.step();
                 ctx.json(SimulationLifecycleResponses.timedStatus("stepped", engine.getTime()));
             } catch (Exception e) {
-                ApiErrors.handleError(ctx, e, false);
+                ApiErrors.handleError(ctx, e, DIAGNOSTIC_SINK);
             }
         } finally {
             lock.writeLock().unlock();
@@ -415,7 +410,7 @@ public class SimulationServer {
                 ApiErrors.jsonError(ctx, 409, "Engine not initialized");
             }
         } catch (Exception e) {
-            ApiErrors.handleError(ctx, e, false);
+            ApiErrors.handleError(ctx, e, DIAGNOSTIC_SINK);
         } finally {
             lock.writeLock().unlock();
         }
@@ -496,7 +491,7 @@ public class SimulationServer {
 
                 ctx.json(cachedParameters);
             } catch (Exception e) {
-                ApiErrors.handleError(ctx, e, true);
+                ApiErrors.handleError(ctx, e, DIAGNOSTIC_SINK);
             }
         } finally {
             lock.writeLock().unlock();
@@ -520,7 +515,7 @@ public class SimulationServer {
             
             ctx.json(ParameterResponseUtils.parameterLists(modelParameters, collectorParameters));
         } catch (Exception e) {
-            ApiErrors.handleError(ctx, e, true);
+            ApiErrors.handleError(ctx, e, DIAGNOSTIC_SINK);
         } finally {
             lock.readLock().unlock();
         }
@@ -556,7 +551,7 @@ public class SimulationServer {
         } catch (MetadataFileUtils.InvalidMetadataPathException e) {
             ctx.status(400).json(Map.of("error", e.getMessage()));
         } catch (Exception e) {
-            ApiErrors.handleError(ctx, e, false);
+            ApiErrors.handleError(ctx, e, DIAGNOSTIC_SINK);
         }
     }
 
@@ -572,7 +567,7 @@ public class SimulationServer {
         } catch (MetadataFileUtils.InvalidMetadataPathException e) {
             ctx.status(400).json(Map.of("error", e.getMessage()));
         } catch (Exception e) {
-            ApiErrors.handleError(ctx, e, false);
+            ApiErrors.handleError(ctx, e, DIAGNOSTIC_SINK);
         }
     }
 
@@ -609,7 +604,7 @@ public class SimulationServer {
             }
             ctx.json(Map.of("files", allFiles));
         } catch (Exception e) {
-            ApiErrors.handleError(ctx, e, false);
+            ApiErrors.handleError(ctx, e, DIAGNOSTIC_SINK);
         }
     }
 
@@ -627,7 +622,7 @@ public class SimulationServer {
         } catch (ConcurrentModificationException e) {
             ctx.json(Map.of("error", "retry"));
         } catch (Exception e) {
-            ApiErrors.handleError(ctx, e, true);
+            ApiErrors.handleError(ctx, e, DIAGNOSTIC_SINK);
         } finally {
             lock.readLock().unlock();
         }
@@ -640,7 +635,7 @@ public class SimulationServer {
         } catch (FileNotFoundException e) {
             ctx.status(404).json(Map.of("error", e.getMessage()));
         } catch (Exception e) {
-            ApiErrors.handleError(ctx, e, false);
+            ApiErrors.handleError(ctx, e, DIAGNOSTIC_SINK);
         }
     }
 
@@ -707,7 +702,7 @@ public class SimulationServer {
             }
             ctx.json(SimulationLifecycleResponses.timedStatus("built", engine.getTime()));
         } catch (Exception e) {
-            ApiErrors.handleError(ctx, e, true);
+            ApiErrors.handleError(ctx, e, DIAGNOSTIC_SINK);
         } finally {
             // stopMemoryMonitor(); 
             lock.writeLock().unlock();
@@ -734,7 +729,7 @@ public class SimulationServer {
         } catch (IllegalThreadStateException e) {
             ctx.status(409).json(SimulationLifecycleResponses.restartableEngineStateError());
         } catch (Exception e) {
-            ApiErrors.handleError(ctx, e, true);
+            ApiErrors.handleError(ctx, e, DIAGNOSTIC_SINK);
         } finally {
             lock.writeLock().unlock();
         }
@@ -785,7 +780,7 @@ public class SimulationServer {
             Map<String, Object> result = TabularDataUtils.rows(file, ',', offset, limit, true, count);
             ctx.json(ParameterResponseUtils.foundParameterHistory(result, timestamp));
         } catch (Exception e) {
-            ApiErrors.handleError(ctx, e, false);
+            ApiErrors.handleError(ctx, e, DIAGNOSTIC_SINK);
         }
     }
 
@@ -817,7 +812,7 @@ public class SimulationServer {
             
             ctx.json(SimulationLifecycleResponses.simpleStatus("updated"));
         } catch (Exception e) {
-            ApiErrors.handleError(ctx, e, true);
+            ApiErrors.handleError(ctx, e, DIAGNOSTIC_SINK);
         } finally {
             lock.writeLock().unlock();
         }
@@ -854,7 +849,7 @@ public class SimulationServer {
             
             ctx.json(SimulationLifecycleResponses.simpleStatus("reset"));
         } catch (Exception e) {
-            ApiErrors.handleError(ctx, e, true);
+            ApiErrors.handleError(ctx, e, DIAGNOSTIC_SINK);
         } finally {
             lock.writeLock().unlock();
         }
@@ -890,7 +885,7 @@ public class SimulationServer {
             if (responseCommitted) {
                 ExportStreamingUtils.logStreamingException("Export zip", e, SimulationServer::addLogMessage);
             } else {
-                ApiErrors.handleError(ctx, e, false);
+                ApiErrors.handleError(ctx, e, DIAGNOSTIC_SINK);
             }
         }
     }
@@ -934,7 +929,7 @@ public class SimulationServer {
             if (responseCommitted) {
                 ExportStreamingUtils.logStreamingException("Export download", e, SimulationServer::addLogMessage);
             } else {
-                ApiErrors.handleError(ctx, e, false);
+                ApiErrors.handleError(ctx, e, DIAGNOSTIC_SINK);
             }
         }
     }
@@ -950,7 +945,7 @@ public class SimulationServer {
             char delim = TabularExportUtils.delimiterForFile(file, ctx.queryParam("delimiter"));
             int previewRows = Math.min(Math.max(ctx.queryParamAsClass("preview", Integer.class).getOrDefault(0), 0), EXPORT_COLUMNS_MAX_PREVIEW_ROWS);
             ctx.json(TabularDataUtils.columns(file, delim, previewRows));
-        } catch (Exception e) { ApiErrors.handleError(ctx, e, false); }
+        } catch (Exception e) { ApiErrors.handleError(ctx, e, DIAGNOSTIC_SINK); }
     }
 
     @SuppressWarnings("unchecked")
@@ -970,7 +965,7 @@ public class SimulationServer {
             } catch (TabularDataUtils.MissingColumnException e) {
                 ctx.status(400).json(Map.of("error", e.getMessage(), "columns", e.getColumns()));
             }
-        } catch (Exception e) { ApiErrors.handleError(ctx, e, false); }
+        } catch (Exception e) { ApiErrors.handleError(ctx, e, DIAGNOSTIC_SINK); }
     }
 
     @SuppressWarnings("unchecked")
@@ -985,7 +980,7 @@ public class SimulationServer {
             long seed = ((Number) body.getOrDefault("seed", 1)).longValue();
             char delim = TabularExportUtils.delimiterForFile(file, body.get("delimiter"));
             ctx.json(TabularDataUtils.sampleRows(file, delim, limit, seed));
-        } catch (Exception e) { ApiErrors.handleError(ctx, e, false); }
+        } catch (Exception e) { ApiErrors.handleError(ctx, e, DIAGNOSTIC_SINK); }
     }
 
 
@@ -1025,7 +1020,7 @@ public class SimulationServer {
             }
             ctx.json(TabularDataUtils.findRows(file, delim, header, filters, limit));
         } catch (Exception e) {
-            ApiErrors.handleError(ctx, e, false);
+            ApiErrors.handleError(ctx, e, DIAGNOSTIC_SINK);
         }
     }
 
@@ -1070,7 +1065,7 @@ public class SimulationServer {
 
             ctx.json(TabularDataUtils.rows(file, delim, offset, limit, header, count));
         } catch (Exception e) {
-            ApiErrors.handleError(ctx, e, false);
+            ApiErrors.handleError(ctx, e, DIAGNOSTIC_SINK);
         }
     }
 
@@ -1082,7 +1077,7 @@ public class SimulationServer {
             if (!requireDataToken(ctx)) return;
             ctx.json(Map.of("files", InputFileUtils.listVisibleInputFiles(new File("input"))));
         } catch (Exception e) {
-            ApiErrors.handleError(ctx, e, false);
+            ApiErrors.handleError(ctx, e, DIAGNOSTIC_SINK);
         }
     }
 
@@ -1122,7 +1117,7 @@ public class SimulationServer {
             if (responseCommitted) {
                 ExportStreamingUtils.logStreamingException("Input download", e, SimulationServer::addLogMessage);
             } else {
-                ApiErrors.handleError(ctx, e, false);
+                ApiErrors.handleError(ctx, e, DIAGNOSTIC_SINK);
             }
         }
     }
@@ -1157,7 +1152,7 @@ public class SimulationServer {
         } catch (IllegalArgumentException e) {
             ctx.status(400).json(Map.of("error", e.getMessage()));
         } catch (Exception e) {
-            ApiErrors.handleError(ctx, e, false);
+            ApiErrors.handleError(ctx, e, DIAGNOSTIC_SINK);
         } finally {
             lock.writeLock().unlock();
         }
@@ -1213,7 +1208,7 @@ public class SimulationServer {
             }
 
         } catch (Exception e) {
-            ApiErrors.handleError(ctx, e, true);
+            ApiErrors.handleError(ctx, e, DIAGNOSTIC_SINK);
         }
     }
 
