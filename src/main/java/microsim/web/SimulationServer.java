@@ -32,6 +32,7 @@ import microsim.web.server.SimulationLogBuffer;
 import microsim.web.server.TabularDataUtils;
 import microsim.web.server.TabularExportUtils;
 import microsim.web.server.WebServerConfig;
+import microsim.web.server.WebBuildValidator;
 import microsim.web.server.SqlSafety;
 
 import java.io.PrintStream;
@@ -647,13 +648,20 @@ public class SimulationServer {
             }
             // startMemoryMonitor();
 
-            engine = SimulationEngine.getInstance();
-            engine.reset();
-            
             Class<?> startClass = Class.forName(startClassName);
             ExperimentBuilder experimentBuilder = (ExperimentBuilder) startClass.getDeclaredConstructor().newInstance();
             
             Map<String, Object> params = ctx.bodyAsClass(Map.class);
+            if (experimentBuilder instanceof WebBuildValidator validator) {
+                try {
+                    validator.validateWebBuildParameters(params == null ? Map.of() : params);
+                } catch (IllegalArgumentException e) {
+                    ApiErrors.jsonError(ctx, 400, e.getMessage());
+                    return;
+                }
+            }
+            engine = SimulationEngine.getInstance();
+            engine.reset();
             if (params != null) {
                 // Preserve support for any experiment-builder/start-class parameters;
                 // model and collector parameters are strictly validated after setup.
