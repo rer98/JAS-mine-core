@@ -17,6 +17,8 @@ import java.awt.Color;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.*;
+import java.util.function.Supplier;
+import microsim.dev.statistics.WeightedValues;
 
 
 /* (C) Copyright 2026, by Ross Richardson
@@ -218,34 +220,24 @@ public class ChartProcessors {
             sourcesField.setAccessible(true);
             ArrayList<?> sources = (ArrayList<?>) sourcesField.get(frame);
 
-            List<Map<String, Object>> seriesList = new ArrayList<>();
-            for (Object source : sources) {
-                Map<String, Object> seriesInfo = new HashMap<>();
-                
-                Field labelField = findFieldInHierarchyOrNull(source.getClass(), "label");
-                if (labelField == null) {
-                    seriesInfo.put("name", "Unknown");
-                } else {
-                    labelField.setAccessible(true);
-                    String label = (String) labelField.get(source);
-                    seriesInfo.put("name", label);
-                }
-                
-                try {
-                    Method getDoubleArrayMethod = source.getClass().getMethod("getDoubleArray");
-                    getDoubleArrayMethod.setAccessible(true);
-                    double[] values = (double[]) getDoubleArrayMethod.invoke(source);
+            Field labelsField = findFieldInHierarchy(frame.getClass(), "labels");
+            labelsField.setAccessible(true);
+            List<?> labels = (List<?>) labelsField.get(frame);
 
-                    Method getWeightsMethod = source.getClass().getMethod("getWeights");
-                    getWeightsMethod.setAccessible(true);
-                    double[] weights = (double[]) getWeightsMethod.invoke(source);
-                    
-                    if (values == null || values.length == 0) continue;
-                    if (weights == null || weights.length != values.length) {
-                        throw new IllegalStateException("Histogram series has mismatched weights/values arrays: "
-                            + "weights.length=" + (weights == null ? "null" : weights.length)
-                            + ", values.length=" + values.length);
-                    }
+            List<Map<String, Object>> seriesList = new ArrayList<>();
+            for (int sourceIndex = 0; sourceIndex < sources.size(); sourceIndex++) {
+                Object source = sources.get(sourceIndex);
+                Map<String, Object> seriesInfo = new HashMap<>();
+                seriesInfo.put("name", labels.get(sourceIndex));
+
+                try {
+                    // Use the same supplier contract as the desktop plotter.
+                    // Read once so values and weights describe the same sample.
+                    WeightedValues<?> sample = (WeightedValues<?>) ((Supplier<?>) source).get();
+                    double[] values = sample.values().stream()
+                        .mapToDouble(value -> ((Number) value).doubleValue()).toArray();
+                    double[] weights = sample.weights().stream().mapToDouble(Double::doubleValue).toArray();
+                    if (values.length == 0) continue;
                     double min = Double.MAX_VALUE, max = -Double.MAX_VALUE;
                     for (double v : values) {
                         if (v < min) min = v;
