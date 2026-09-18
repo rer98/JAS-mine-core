@@ -17,8 +17,6 @@ import java.awt.Color;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.*;
-import java.util.function.Supplier;
-import microsim.dev.statistics.WeightedValues;
 
 
 /* (C) Copyright 2026, by Ross Richardson
@@ -212,72 +210,16 @@ public class ChartProcessors {
             Map<String, Object> chartInfo = createChartInfo(frame.getTitle(), "histogram");
             chartInfo.put("isIncremental", false);
             
-            Field binsField = findFieldInHierarchy(frame.getClass(), "bins");
-            binsField.setAccessible(true);
-            int bins = (int) binsField.get(frame);
-            
-            Field sourcesField = findFieldInHierarchy(frame.getClass(), "sources");
-            sourcesField.setAccessible(true);
-            ArrayList<?> sources = (ArrayList<?>) sourcesField.get(frame);
-
-            Field labelsField = findFieldInHierarchy(frame.getClass(), "labels");
-            labelsField.setAccessible(true);
-            List<?> labels = (List<?>) labelsField.get(frame);
-
             List<Map<String, Object>> seriesList = new ArrayList<>();
-            for (int sourceIndex = 0; sourceIndex < sources.size(); sourceIndex++) {
-                Object source = sources.get(sourceIndex);
-                Map<String, Object> seriesInfo = new HashMap<>();
-                seriesInfo.put("name", labels.get(sourceIndex));
-
-                try {
-                    // Use the same supplier contract as the desktop plotter.
-                    // Read once so values and weights describe the same sample.
-                    WeightedValues<?> sample = (WeightedValues<?>) ((Supplier<?>) source).get();
-                    double[] values = sample.values().stream()
-                        .mapToDouble(value -> ((Number) value).doubleValue()).toArray();
-                    double[] weights = sample.weights().stream().mapToDouble(Double::doubleValue).toArray();
-                    if (values.length == 0) continue;
-                    double min = Double.MAX_VALUE, max = -Double.MAX_VALUE;
-                    for (double v : values) {
-                        if (v < min) min = v;
-                        if (v > max) max = v;
-                    }
-                    if (min == max) {
-                        double pad = Math.max(Math.abs(min) * 0.01, 0.5);
-                        min -= pad;
-                        max += pad;
-                    }
-                    
-                    double binWidth = (max - min) / bins;
-                    double[] binCounts = new double[bins];
-                    List<Double> binEdges = new ArrayList<>();
-                    
-                    for (int i = 0; i <= bins; i++) {
-                        binEdges.add(min + i * binWidth);
-                    }
-                    
-                    for (int i = 0; i < values.length; i++) {
-                        int binIndex = (int) ((values[i] - min) / binWidth);
-                        if (binIndex >= bins) binIndex = bins - 1;
-                        if (binIndex < 0) binIndex = 0;
-                        binCounts[binIndex] += weights[i];
-                    }
-                    
-                    List<Double> counts = new ArrayList<>();
-                    for (double c : binCounts) counts.add(c);
-                    
-                    seriesInfo.put("binEdges", binEdges);
-                    seriesInfo.put("counts", counts);
-                } catch (Exception e) {
-                    SimulationServer.addLogMessage("HistogramProcessor: error processing series '"
-                        + seriesInfo.get("name") + "': " + e.getClass().getSimpleName() + ": " + e.getMessage());
-                    seriesInfo.put("binEdges", new ArrayList<>());
-                    seriesInfo.put("counts", new ArrayList<>());
-                }
-                seriesList.add(seriesInfo);
+            var histogram = (Weighted_HistogramSimulationPlotter) frame;
+            for (var series : histogram.getCompletedHistogram()) {
+                Map<String, Object> info = new HashMap<>();
+                info.put("name", series.name());
+                info.put("binEdges", series.binEdges());
+                info.put("counts", series.values());
+                seriesList.add(info);
             }
-            
+
             String xAxisTitle = "";
             String yAxisTitle = "";
             try {
