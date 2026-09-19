@@ -254,6 +254,8 @@ public class DatabaseUtils {
 
                 var propertyMap = new HashMap<String, String>();
                 propertyMap.put("hibernate.connection.url", "jdbc:h2:file:" + databaseInputUrl);
+                microsim.data.StorageProtection.protectDatabase("core.input-factory",
+                    java.nio.file.Path.of(databaseInputUrl), "Retained core input connection factory");
                 entityManagerFactory = Persistence.createEntityManagerFactory("sim-model", propertyMap);
 
             } catch (Throwable ex) {
@@ -274,6 +276,8 @@ public class DatabaseUtils {
                 // Create the EntityManagerFactory
                 var propertyMap = new HashMap<String, String>();
                 propertyMap.put("hibernate.connection.url", "jdbc:h2:file:" + DatabaseUtils.databaseInputUrl);
+                microsim.data.StorageProtection.protectDatabase("core.schema-update:" + databaseInputUrl,
+                    java.nio.file.Path.of(databaseInputUrl), "Schema update connection lifetime not established");
                 EntityManager em = Persistence.createEntityManagerFactory("sim-model", propertyMap)
                         .createEntityManager();
                 EntityTransaction tx = em.getTransaction();
@@ -326,6 +330,7 @@ public class DatabaseUtils {
             if (entityManagerFactory != null && entityManagerFactory.isOpen()) {
                 entityManagerFactory.close();
             }
+            microsim.data.StorageProtection.release("core.input-factory");
         } finally {
             entityManagerFactory = null;
             databaseInputUrl = null;

@@ -32,3 +32,24 @@ mvn javadoc:javadoc
 ```
 
 It is generated in `target/reports/apidocs`.
+
+
+## Session storage protection
+
+The web server supports opt-in usage reporting, build admission and confirmed
+run-level cleanup. Configure JASMINE_STORAGE_BYTES, JASMINE_STORAGE_WARN_BYTES,
+JASMINE_STORAGE_RESERVE_BYTES and (separately) JASMINE_STORAGE_CLEANUP_ENABLED.
+Cleanup also requires detailed-data access and Reset/disposal.
+
+Models register retained H2 databases using
+`microsim.data.StorageProtection.protectDatabase(owner, basePath, reason)` and
+release each independent owner only when its dependency has ended. Base paths
+exclude `.mv.db`. Whole-directory protection remains available for other model
+dependencies. Enable cleanup only after reviewing all retained resources.
+
+Selected retired run directories are cleared except protected databases and their
+companion files. Necessary paths remain; empty unprotected directories are removed.
+Preview tokens are expiring/single-use and deletion rechecks candidates and claims.
+Core SQL queries and file/ZIP downloads share the lifecycle lock with cleanup.
+No factories are closed by cleanup. See JAS-mine-web `docs/session-storage.md`
+for the complete contract, configuration and host quota limitations.

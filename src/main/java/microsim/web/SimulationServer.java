@@ -3,6 +3,8 @@ package microsim.web;
 import io.javalin.Javalin;
 import io.javalin.http.Context;
 
+import microsim.web.server.SessionStorage;
+import java.nio.file.Path;
 import microsim.data.GUIParameterHistory;
 import microsim.data.db.DatabaseUtils;
 import microsim.engine.ExperimentBuilder;
@@ -223,6 +225,9 @@ public class SimulationServer {
             config.routes.get("/simulation/metadata/source-info", SimulationServer::handleSourceInfo);
 
             // Write endpoints
+            config.routes.get("/simulation/storage", SimulationServer::handleStorage);
+            config.routes.post("/simulation/storage/preview", ctx -> handleCleanup(ctx, false));
+            config.routes.post("/simulation/storage/delete", ctx -> handleCleanup(ctx, true));
             config.routes.post("/simulation/build", SimulationServer::handleBuild);
             config.routes.post("/simulation/start", SimulationServer::handleStart);
             config.routes.post("/simulation/update-params", SimulationServer::handleUpdateParams);
@@ -360,6 +365,8 @@ public class SimulationServer {
 
 
     // ===== Endpoint Handlers =====
+
+    private static final SessionStorage storage = SessionStorage.fromEnvironment();
 
     private static void handleHealth(Context ctx) {
         ctx.json(Map.of("status", "ok", "timestamp", System.currentTimeMillis(), "modelPrefix", modelPrefix));
@@ -639,6 +646,48 @@ public class SimulationServer {
         }
     }
 
+    private static void handleStorage(Context ctx) {
+        if (!requireDataToken(ctx)) return;
+        if (!lock.readLock().tryLock()) { ctx.json(Map.of("busy", true)); return; }
+        try {
+            Map<String, Object> status = new HashMap<>(storage.status());
+            status.put("cleanupEnabled", storage.enabled() && detailedDataAccessAllowed
+                && Boolean.parseBoolean(System.getenv("JASMINE_STORAGE_CLEANUP_ENABLED")));
+            ctx.json(status);
+        }
+        catch (Exception e) { ApiErrors.handleError(ctx, e, DIAGNOSTIC_SINK); }
+        finally { lock.readLock().unlock(); }
+    }
+
+    private static void handleCleanup(Context ctx, boolean delete) {
+        if (!requireDataToken(ctx)) return;
+        if (!storage.enabled() || !detailedDataAccessAllowed
+                || !Boolean.parseBoolean(System.getenv("JASMINE_STORAGE_CLEANUP_ENABLED"))) {
+            ApiErrors.jsonError(ctx, 403, "Storage cleanup is not enabled for this model"); return;
+        }
+        if (!lock.writeLock().tryLock()) {
+            ApiErrors.jsonError(ctx, 409, "Another lifecycle operation is in progress"); return;
+        }
+        try {
+            // Reset must dispose all model writers before any file becomes eligible.
+            if (engine != null || SimulationEngine.getInstance().getRunningStatus()) {
+                ApiErrors.jsonError(ctx, 409, "Reset the simulation before reviewing cleanup"); return;
+            }
+            if (DatabaseUtils.databaseOutputUrl != null)
+                microsim.data.StorageProtection.protectDatabase("core.shared-output",
+                    Path.of(DatabaseUtils.databaseOutputUrl), "Shared output database for cross-run results");
+            if (!delete) { ctx.json(storage.preview()); return; }
+            Map<String, Object> body = ctx.bodyAsClass(Map.class);
+            if (!(body.get("token") instanceof String token) || !(body.get("runs") instanceof List<?> files)
+                    || files.stream().anyMatch(f -> !(f instanceof String))) {
+                ApiErrors.jsonError(ctx, 400, "Expected a preview token and selected run paths"); return;
+            }
+            ctx.json(storage.delete(token, files.stream().map(String.class::cast).toList()));
+        } catch (IllegalArgumentException e) { ApiErrors.jsonError(ctx, 409, e.getMessage()); }
+        catch (Exception e) { ApiErrors.handleError(ctx, e, DIAGNOSTIC_SINK); }
+        finally { lock.writeLock().unlock(); }
+    }
+
     private static void handleBuild(Context ctx) {
         lock.writeLock().lock();
         try {
@@ -646,6 +695,8 @@ public class SimulationServer {
                 ApiErrors.jsonError(ctx, 409, "Simulation already built");
                 return;
             }
+            try { storage.requireBuildCapacity(); }
+            catch (IllegalStateException e) { ApiErrors.jsonError(ctx, 507, e.getMessage()); return; }
             // startMemoryMonitor();
 
             Class<?> startClass = Class.forName(startClassName);
@@ -830,7 +881,10 @@ public class SimulationServer {
         SimulationEngine activeEngine = engine;
         if (activeEngine != null) {
             if (activeEngine.getRunningStatus()) activeEngine.pause();
+            Path retiredRun = activeEngine.getCurrentExperiment() == null ? null
+                : Path.of(activeEngine.getCurrentExperiment().getOutputFolder());
             activeEngine.disposeModels();
+            if (retiredRun != null) storage.retire(retiredRun);
         }
         engine = null;
         if (advanceRunNumber && hadModel) {
@@ -864,6 +918,12 @@ public class SimulationServer {
 
     // This streams the zip directly to the client, using almost no heap memory.
     private static void handleExportZip(Context ctx) {
+        lock.readLock().lock();
+        try { handleExportZipLocked(ctx); }
+        finally { lock.readLock().unlock(); }
+    }
+
+    private static void handleExportZipLocked(Context ctx) {
         boolean responseCommitted = false;
         try {
             if (!requireDataToken(ctx)) return;
@@ -900,6 +960,12 @@ public class SimulationServer {
 
 
     private static void handleExportDownload(Context ctx) {
+        lock.readLock().lock();
+        try { handleExportDownloadLocked(ctx); }
+        finally { lock.readLock().unlock(); }
+    }
+
+    private static void handleExportDownloadLocked(Context ctx) {
         boolean responseCommitted = false;
         try {
             if (!requireDataToken(ctx)) return;
@@ -1187,6 +1253,12 @@ public class SimulationServer {
 
     // To allow database querying via JAS-mine Web
     private static void handleDbQuery(Context ctx) {
+        lock.readLock().lock();
+        try { handleDbQueryLocked(ctx); }
+        finally { lock.readLock().unlock(); }
+    }
+
+    private static void handleDbQueryLocked(Context ctx) {
         if (!requireDataToken(ctx)) return;
         if (!detailedDataAccessAllowed) {
             ctx.status(403).json(Map.of("error", "Database access is not allowed for this model"));
