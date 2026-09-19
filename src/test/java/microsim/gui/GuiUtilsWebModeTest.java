@@ -1,3 +1,11 @@
+/* (C) Copyright 2026, by Ross Richardson
+ *
+ * Gui Utils Web Mode Test.
+ *
+ * @author ross richardson
+ *
+ */
+
 package microsim.gui;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;

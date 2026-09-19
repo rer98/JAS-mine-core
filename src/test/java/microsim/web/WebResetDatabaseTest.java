@@ -1,3 +1,11 @@
+/* (C) Copyright 2026, by Ross Richardson
+ *
+ * Web Reset Database Test.
+ *
+ * @author ross richardson
+ *
+ */
+
 package microsim.web;
 
 import jakarta.persistence.EntityManagerFactory;

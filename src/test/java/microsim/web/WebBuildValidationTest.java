@@ -1,3 +1,11 @@
+/* (C) Copyright 2026, by Ross Richardson
+ *
+ * Web Build Validation Test.
+ *
+ * @author ross richardson
+ *
+ */
+
 package microsim.web;
 
 import io.javalin.http.Context;

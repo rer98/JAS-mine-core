@@ -3,9 +3,14 @@ package microsim.data;
 import java.nio.file.Path;
 import java.util.*;
 
-/** Cleanup metadata only: never opens, closes or relocates model resources.
+/* (C) Copyright 2026, by Ross Richardson
+ *
+ * Cleanup metadata only: never opens, closes or relocates model resources.
  * Each owner holds an independent claim, released only after successful closure.
  * Mutations and cleanup synchronize on this class to prevent protection races.
+ *
+ * @author ross richardson
+ *
  */
 public final class StorageProtection {
     public record Claim(Path base, String reason) {}

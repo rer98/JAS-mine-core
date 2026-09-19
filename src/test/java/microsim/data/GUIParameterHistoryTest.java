@@ -1,3 +1,11 @@
+/* (C) Copyright 2026, by Ross Richardson
+ *
+ * GUIParameter History Test.
+ *
+ * @author ross richardson
+ *
+ */
+
 package microsim.data;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;

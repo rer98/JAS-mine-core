@@ -1,3 +1,11 @@
+/* (C) Copyright 2026, by Ross Richardson
+ *
+ * Session Storage Test.
+ *
+ * @author ross richardson
+ *
+ */
+
 package microsim.web.server;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

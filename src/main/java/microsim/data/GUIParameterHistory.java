@@ -17,7 +17,13 @@ import java.util.Objects;
 import microsim.annotation.GUIparameter;
 import microsim.engine.SimulationManager;
 
-/** Records initial GUI parameters and later explicit user changes for a run. */
+/* (C) Copyright 2026, by Ross Richardson
+ *
+ * Records initial GUI parameters and later explicit user changes for a run.
+ *
+ * @author ross richardson
+ *
+ */
 public final class GUIParameterHistory {
 
     public static final String FILE_NAME = "GUIparameters.csv";

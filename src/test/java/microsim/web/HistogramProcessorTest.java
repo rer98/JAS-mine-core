@@ -1,3 +1,11 @@
+/* (C) Copyright 2026, by Ross Richardson
+ *
+ * Histogram Processor Test.
+ *
+ * @author ross richardson
+ *
+ */
+
 package microsim.web;
 
 import static org.junit.jupiter.api.Assertions.*;

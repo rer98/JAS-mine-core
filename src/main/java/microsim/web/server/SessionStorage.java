@@ -5,7 +5,13 @@ import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.*;
 
-/** Opt-in session accounting and conservative cleanup. Never follows symbolic links. */
+/* (C) Copyright 2026, by Ross Richardson
+ *
+ * Opt-in session accounting and conservative cleanup. Never follows symbolic links.
+ *
+ * @author ross richardson
+ *
+ */
 public final class SessionStorage {
     private final Path root;
     private final long allowance, warning, reserve;
