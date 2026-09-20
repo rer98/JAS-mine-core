@@ -72,6 +72,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 public class SimulationServer {
 
+    private static microsim.web.server.WebStartupSession startupSession;
+
+    /** Register before main; models without startup choices retain their existing flow. */
+    public static void setStartupProvider(microsim.web.server.WebStartupProvider provider) {
+        startupSession = new microsim.web.server.WebStartupSession(provider);
+    }
+
     // Configuration loaded from properties
     private static String modelPrefix;
     private static String modelPackage;
@@ -229,6 +236,12 @@ public class SimulationServer {
             config.routes.post("/simulation/storage/preview", ctx -> handleCleanup(ctx, false));
             config.routes.post("/simulation/storage/delete", ctx -> handleCleanup(ctx, true));
             config.routes.post("/simulation/build", SimulationServer::handleBuild);
+            config.routes.get("/simulation/startup", ctx -> {
+                if (requireDataToken(ctx)) ctx.json(startupSession == null
+                        ? Map.of("supported", false) : startupSession.status());
+            });
+            config.routes.post("/simulation/startup/review", ctx -> handleStartup(ctx, false));
+            config.routes.post("/simulation/startup/confirm", ctx -> handleStartup(ctx, true));
             config.routes.post("/simulation/start", SimulationServer::handleStart);
             config.routes.post("/simulation/update-params", SimulationServer::handleUpdateParams);
             config.routes.post("/simulation/reset", SimulationServer::handleReset);
@@ -688,6 +701,31 @@ public class SimulationServer {
         finally { lock.writeLock().unlock(); }
     }
 
+    private static void handleStartup(Context ctx, boolean confirm) {
+        if (!requireDataToken(ctx)) return;
+        if (startupSession == null) { ApiErrors.jsonError(ctx, 404, "No model startup choices"); return; }
+        if (!lock.writeLock().tryLock()) { ApiErrors.jsonError(ctx, 409, "Model is busy"); return; }
+        try {
+            Map<?, ?> body = ctx.bodyAsClass(Map.class);
+            if (confirm) {
+                if (!(body.get("token") instanceof String token)) throw new IllegalArgumentException("Missing review token");
+                startupSession.confirm(token, task -> Thread.ofPlatform().daemon().name("model-startup").start(task),
+                        lock.writeLock(), SimulationServer::addLogMessage);
+                ctx.json(Map.of("state", "preparing"));
+            } else {
+                if (!(body.get("choices") instanceof Map<?, ?> supplied)) throw new IllegalArgumentException("Missing choices");
+                Map<String, Boolean> choices = new LinkedHashMap<>();
+                for (var entry : supplied.entrySet()) {
+                    if (!(entry.getKey() instanceof String key) || !(entry.getValue() instanceof Boolean value))
+                        throw new IllegalArgumentException("Expected boolean startup choices");
+                    choices.put(key, value);
+                }
+                ctx.json(startupSession.review(choices));
+            }
+        } catch (Exception e) { ApiErrors.jsonError(ctx, 409, e.getMessage()); }
+        finally { lock.writeLock().unlock(); }
+    }
+
     private static void handleBuild(Context ctx) {
         lock.writeLock().lock();
         try {
@@ -697,6 +735,10 @@ public class SimulationServer {
             }
             try { storage.requireBuildCapacity(); }
             catch (IllegalStateException e) { ApiErrors.jsonError(ctx, 507, e.getMessage()); return; }
+            if (startupSession != null) {
+                try { startupSession.requireReady(); }
+                catch (Exception e) { ApiErrors.jsonError(ctx, 409, e.getMessage()); return; }
+            }
             // startMemoryMonitor();
 
             Class<?> startClass = Class.forName(startClassName);
@@ -711,6 +753,7 @@ public class SimulationServer {
                     return;
                 }
             }
+            if (startupSession != null) startupSession.buildStarting();
             engine = SimulationEngine.getInstance();
             engine.reset();
             if (params != null) {
