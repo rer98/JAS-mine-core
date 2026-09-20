@@ -117,4 +117,28 @@ public class ChartProcessorsTest {
         assertNotEquals(-1, ChartProcessorSupport.GRID_EMPTY_COLOR_VALUE);
         assertNotEquals(-2, ChartProcessorSupport.GRID_EMPTY_COLOR_VALUE);
     }
+    @Test
+    @SuppressWarnings("unchecked")
+    public void pyramidUsesFullDatasetLabelsEvenWhenDesktopLabelsAreHidden() throws Exception {
+        var frame = new microsim.gui.plot.Weighted_PyramidPlotter();
+        var constructor = microsim.gui.plot.Weighted_PyramidPlotter.GroupName.class
+                .getDeclaredConstructor(String.class, Boolean.class);
+        constructor.setAccessible(true);
+        var dataset = new org.jfree.data.category.DefaultCategoryDataset();
+        for (int age = 0; age < 4; age++) {
+            var key = constructor.newInstance(String.valueOf(age), false);
+            assertEquals("", key.toString());
+            dataset.addValue(-500000, "Male", key);
+            dataset.addValue(490000, "Female", key);
+        }
+        var chart = org.jfree.chart.ChartFactory.createStackedBarChart("Population", "Age", "People", dataset);
+        var field = frame.getClass().getDeclaredField("chart");
+        field.setAccessible(true);
+        field.set(frame, chart);
+        var result = new ChartProcessors.PyramidProcessor().process(frame, 0);
+        assertEquals(List.of("0", "1", "2", "3"), result.get("labels"));
+        var series = (List<java.util.Map<String, Object>>) result.get("series");
+        assertEquals(List.of(-500000.0, -500000.0, -500000.0, -500000.0), series.get(0).get("values"));
+    }
+
 }

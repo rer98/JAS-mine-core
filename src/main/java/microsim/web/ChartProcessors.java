@@ -357,24 +357,7 @@ public class ChartProcessors {
             chartInfo.put("xAxisTitle", xAxisTitle);
             chartInfo.put("yAxisTitle", yAxisTitle);
 
-            // Try to get full group labels from groupNames field (toString() hides some for readability)
             List<String> labels = new ArrayList<>();
-            Field groupNamesField = findFieldInHierarchyOrNull(frame.getClass(), "groupNames");
-            if (groupNamesField != null) {
-                try {
-                    groupNamesField.setAccessible(true);
-                    Object[] groupNameObjs = (Object[]) groupNamesField.get(frame);
-                    if (groupNameObjs != null) {
-                        for (Object gn : groupNameObjs) {
-                            Field valueField = findFieldInHierarchy(gn.getClass(), "value");
-                            valueField.setAccessible(true);
-                            labels.add((String) valueField.get(gn));
-                        }
-                    }
-                } catch (Exception e) {
-                    // Fall back to chart dataset column keys below
-                }
-            }
 
             // Extract series data from the chart's CategoryDataset
             List<Map<String, Object>> seriesList = new ArrayList<>();
@@ -383,10 +366,17 @@ public class ChartProcessors {
                 org.jfree.data.category.CategoryDataset dataset = plot.getDataset();
 
                 if (dataset != null) {
-                    // Fall back to dataset column keys if groupNames extraction failed
-                    if (labels.isEmpty()) {
-                        for (int c = 0; c < dataset.getColumnCount(); c++) {
-                            labels.add(dataset.getColumnKey(c).toString());
+                    // Read the actual dataset keys: automatically generated groups are
+                    // local to update(), and GroupName.toString() intentionally hides
+                    // most labels on desktop. Repeated blanks would stack ages in Plotly.
+                    for (int c = 0; c < dataset.getColumnCount(); c++) {
+                        Object key = dataset.getColumnKey(c);
+                        if (key instanceof Weighted_PyramidPlotter.GroupName) {
+                            Field value = findFieldInHierarchy(key.getClass(), "value");
+                            value.setAccessible(true);
+                            labels.add((String) value.get(key));
+                        } else {
+                            labels.add(key.toString());
                         }
                     }
 
