@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 
@@ -30,6 +31,22 @@ import java.util.function.Consumer;
 /** Helpers for turning registered Swing plotters into chart endpoint responses. */
 public final class ChartResponseUtils {
     private static final Set<String> REPORTED_UNSUPPORTED_FRAMES = ConcurrentHashMap.newKeySet();
+
+    private static final Object CHART_ID_PROPERTY = new Object();
+    private static final AtomicLong NEXT_CHART_ID = new AtomicLong();
+
+    // The frame owns its ID, so discarded builds are not retained by a registry.
+    // New frames receive new IDs even when their titles match an earlier build.
+    static String chartId(JInternalFrame frame) {
+        synchronized (frame) {
+            String id = (String) frame.getClientProperty(CHART_ID_PROPERTY);
+            if (id == null) {
+                id = "chart-" + NEXT_CHART_ID.incrementAndGet();
+                frame.putClientProperty(CHART_ID_PROPERTY, id);
+            }
+            return id;
+        }
+    }
 
     private ChartResponseUtils() {}
 
@@ -81,8 +98,11 @@ public final class ChartResponseUtils {
             for (ChartProcessors.ChartProcessor processor : ChartProcessors.getProcessors()) {
                 if (processor.canProcess(frame)) {
                     try {
-                        int sinceIndex = sinceMap.getOrDefault(frame.getTitle(), 0);
-                        charts.add(processor.process(frame, sinceIndex));
+                        String id = chartId(frame);
+                        int sinceIndex = sinceMap.getOrDefault(id, 0);
+                        Map<String, Object> chartInfo = new HashMap<>(processor.process(frame, sinceIndex));
+                        chartInfo.put("id", id);
+                        charts.add(chartInfo);
                     } catch (Exception e) {
                         e.printStackTrace();
                     }
@@ -98,7 +118,7 @@ public final class ChartResponseUtils {
         for (Map<String, Object> chartInfo : charts) {
             Object nextIdx = chartInfo.get("nextIndex");
             if (nextIdx instanceof Integer) {
-                newIndices.put((String) chartInfo.get("title"), (Integer) nextIdx);
+                newIndices.put((String) chartInfo.get("id"), (Integer) nextIdx);
             }
         }
         return Map.of("charts", charts, "newIndices", newIndices);
@@ -125,7 +145,7 @@ public final class ChartResponseUtils {
     private static boolean addIfProcessable(JInternalFrame frame, List<JInternalFrame> plotters) {
         for (ChartProcessors.ChartProcessor proc : ChartProcessors.getProcessors()) {
             if (proc.canProcess(frame)) {
-                plotters.add(frame);
+                if (!plotters.contains(frame)) plotters.add(frame);
                 return true;
             }
         }

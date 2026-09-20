@@ -53,8 +53,8 @@ public class ChartResponseUtilsTest {
     @Test
     public void responseFromChartsCollectsIntegerNextIndices() {
         List<Map<String, Object>> charts = List.of(
-            Map.of("title", "A", "nextIndex", 10),
-            Map.of("title", "B", "nextIndex", "ignored"),
+            Map.of("id", "chart-1", "title", "A", "nextIndex", 10),
+            Map.of("id", "chart-2", "title", "A", "nextIndex", 20),
             Map.of("title", "C")
         );
 
@@ -63,7 +63,7 @@ public class ChartResponseUtilsTest {
         assertSame(charts, res.get("charts"));
         @SuppressWarnings("unchecked")
         Map<String, Integer> newIndices = (Map<String, Integer>) res.get("newIndices");
-        assertEquals(Map.of("A", 10), newIndices);
+        assertEquals(Map.of("chart-1", 10, "chart-2", 20), newIndices);
     }
 
     @Test
@@ -93,4 +93,37 @@ public class ChartResponseUtilsTest {
             messages.get(1)
         );
     }
+    @Test
+    @SuppressWarnings("unchecked")
+    public void duplicateTitlesHaveIndependentCursorsAndRebuiltFramesHaveFreshIds() throws Exception {
+        var first = new microsim.gui.plot.TimeSeriesSimulationPlotter("Same title", "Value");
+        var second = new microsim.gui.plot.TimeSeriesSimulationPlotter("Same title", "Value");
+        var field = first.getClass().getDeclaredField("dataset");
+        field.setAccessible(true);
+        for (var frame : List.of(first, second)) {
+            var series = new org.jfree.data.xy.XYSeries("Values");
+            series.add(2019, 1);
+            series.add(2020, 2);
+            ((org.jfree.data.xy.XYSeriesCollection) field.get(frame)).addSeries(series);
+        }
+        String firstId = ChartResponseUtils.chartId(first);
+        String secondId = ChartResponseUtils.chartId(second);
+        assertNotEquals(firstId, secondId);
+        first.setTitle("Renamed");
+        assertEquals(firstId, ChartResponseUtils.chartId(first));
+        first.setTitle("Same title");
+        var response = ChartResponseUtils.buildChartResponse(List.of(first, second),
+                Map.of(firstId, 1, secondId, 2));
+        var charts = (List<Map<String, Object>>) response.get("charts");
+        assertEquals(2, charts.size());
+        var firstSeries = (List<Map<String, Object>>) charts.get(0).get("series");
+        var secondSeries = (List<Map<String, Object>>) charts.get(1).get("series");
+        assertEquals(1, ((List<?>) firstSeries.get(0).get("x" )).size());
+        assertEquals(0, ((List<?>) secondSeries.get(0).get("x" )).size());
+        assertEquals(Map.of(firstId, 2, secondId, 2), response.get("newIndices"));
+        var rebuilt = new microsim.gui.plot.TimeSeriesSimulationPlotter("Same title", "Value");
+        assertNotEquals(firstId, ChartResponseUtils.chartId(rebuilt));
+        assertNotEquals(secondId, ChartResponseUtils.chartId(rebuilt));
+    }
+
 }
