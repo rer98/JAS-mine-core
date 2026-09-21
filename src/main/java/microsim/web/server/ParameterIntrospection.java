@@ -47,6 +47,34 @@ public final class ParameterIntrospection {
         }
     }
 
+    /** Validate submitted field types without creating managers or touching engine state. */
+    public static Map<String, String> validateBuildTypes(Map<String, Object> values, Class<?>... types) {
+        Map<String, String> errors = new java.util.LinkedHashMap<>();
+        values.forEach((name, value) -> {
+            boolean matched = false;
+            for (Class<?> type : types) {
+                if (type == null) continue;
+                try {
+                    Field field = type.getDeclaredField(name);
+                    if (!field.isAnnotationPresent(GUIparameter.class)) continue;
+                    matched = true;
+                    try { convertValue(field, value); }
+                    catch (IllegalArgumentException e) { errors.put(name, e.getMessage()); }
+                } catch (NoSuchFieldException ignored) {}
+            }
+            if (!matched) errors.put(name, "Unknown or non-GUI parameter: " + name);
+        });
+        return errors;
+    }
+
+    public static void addConstraints(List<Map<String, Object>> parameters,
+            Map<String, microsim.parameter.ParameterConstraints.Rule> rules) {
+        for (var parameter : parameters) {
+            var rule = rules.get(parameter.get("name"));
+            if (rule != null) parameter.put("constraints", rule.metadata());
+        }
+    }
+
     public static void extractParameters(Object target, List<Map<String, Object>> paramList) {
         Field[] fields = target.getClass().getDeclaredFields();
         for (Field field : fields) {

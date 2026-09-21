@@ -10,6 +10,10 @@ import java.util.Map;
  *
  */
 public interface WebBuildValidator {
-    /** Reject incompatible configuration with IllegalArgumentException. Must not mutate the request. */
+    /**
+     * Reject incompatible configuration with IllegalArgumentException before Build starts.
+     * Must not mutate the request, engine, model, or input/output files: rejection is
+     * reported as recoverable and users may correct parameters and retry.
+     */
     void validateWebBuildParameters(Map<String, Object> parameters);
 }

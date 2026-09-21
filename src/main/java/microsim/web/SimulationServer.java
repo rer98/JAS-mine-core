@@ -505,6 +505,10 @@ public class SimulationServer {
                     ParameterIntrospection.extractParameters(tempCollector, collectorParameters);
                 }
 
+                if (tempBuilder instanceof microsim.parameter.ParameterConstraints.Provider provider) {
+                    ParameterIntrospection.addConstraints(modelParameters, provider.parameterConstraints());
+                    ParameterIntrospection.addConstraints(collectorParameters, provider.parameterConstraints());
+                }
                 tempEngine.disposeModels();
 
                 cachedParameters = ParameterResponseUtils.parameterLists(modelParameters, collectorParameters);
@@ -533,6 +537,11 @@ public class SimulationServer {
                 ParameterIntrospection.extractParameters(collector, collectorParameters);
             }
             
+            var constraintBuilder = engine.getExperimentBuilder();
+            if (constraintBuilder instanceof microsim.parameter.ParameterConstraints.Provider provider) {
+                ParameterIntrospection.addConstraints(modelParameters, provider.parameterConstraints());
+                ParameterIntrospection.addConstraints(collectorParameters, provider.parameterConstraints());
+            }
             ctx.json(ParameterResponseUtils.parameterLists(modelParameters, collectorParameters));
         } catch (Exception e) {
             ApiErrors.handleError(ctx, e, DIAGNOSTIC_SINK);
@@ -744,12 +753,29 @@ public class SimulationServer {
             Class<?> startClass = Class.forName(startClassName);
             ExperimentBuilder experimentBuilder = (ExperimentBuilder) startClass.getDeclaredConstructor().newInstance();
             
-            Map<String, Object> params = ctx.bodyAsClass(Map.class);
+            Map<String, Object> params;
+            try { params = ctx.bodyAsClass(Map.class); }
+            catch (Exception e) {
+                ctx.status(400).json(Map.of("code", "parameter_validation_rejected", "error", "Invalid parameter JSON"));
+                return;
+            }
+            if (params == null) params = Map.of();
+            var errors = ParameterIntrospection.validateBuildTypes(params, startClass,
+                    Class.forName(modelClassName), collectorClassName == null || collectorClassName.isBlank()
+                            ? null : Class.forName(collectorClassName));
+            if (experimentBuilder instanceof microsim.parameter.ParameterConstraints.Provider provider) {
+                errors.putAll(microsim.parameter.ParameterConstraints.violations(provider.parameterConstraints(), params));
+            }
+            if (!errors.isEmpty()) {
+                ctx.status(400).json(Map.of("code", "parameter_validation_rejected",
+                        "error", String.join("; ", errors.values()), "fieldErrors", errors));
+                return;
+            }
             if (experimentBuilder instanceof WebBuildValidator validator) {
                 try {
-                    validator.validateWebBuildParameters(params == null ? Map.of() : params);
+                    validator.validateWebBuildParameters(params);
                 } catch (IllegalArgumentException e) {
-                    ApiErrors.jsonError(ctx, 400, e.getMessage());
+                    ctx.status(400).json(Map.of("code", "parameter_validation_rejected", "error", e.getMessage()));
                     return;
                 }
             }
@@ -901,6 +927,9 @@ public class SimulationServer {
                 try {
                     // Keep the existing web design: runtime updates target the
                     // model parameters exposed by the Update Params modal.
+                    var constraintBuilder = engine.getExperimentBuilder();
+                    if (constraintBuilder instanceof microsim.parameter.ParameterConstraints.Provider provider)
+                        microsim.parameter.ParameterConstraints.validate(provider.parameterConstraints(), params);
                     ParameterIntrospection.validateAndApplyParameters(model.getClass(), model, params);
                 } catch (IllegalArgumentException e) {
                     ctx.status(400).json(Map.of("error", "Invalid parameter update: " + e.getMessage()));
