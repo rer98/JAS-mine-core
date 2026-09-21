@@ -664,7 +664,7 @@ public class SimulationServer {
         if (!lock.readLock().tryLock()) { ctx.json(Map.of("busy", true)); return; }
         try {
             Map<String, Object> status = new HashMap<>(storage.status());
-            status.put("cleanupEnabled", storage.enabled() && detailedDataAccessAllowed
+            status.put("cleanupEnabled", storage.enabled()
                 && Boolean.parseBoolean(System.getenv("JASMINE_STORAGE_CLEANUP_ENABLED")));
             ctx.json(status);
         }
@@ -674,7 +674,7 @@ public class SimulationServer {
 
     private static void handleCleanup(Context ctx, boolean delete) {
         if (!requireDataToken(ctx)) return;
-        if (!storage.enabled() || !detailedDataAccessAllowed
+        if (!storage.enabled()
                 || !Boolean.parseBoolean(System.getenv("JASMINE_STORAGE_CLEANUP_ENABLED"))) {
             ApiErrors.jsonError(ctx, 403, "Storage cleanup is not enabled for this model"); return;
         }
