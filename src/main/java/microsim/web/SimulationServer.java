@@ -780,6 +780,7 @@ public class SimulationServer {
                 }
             }
             if (startupSession != null) startupSession.buildStarting();
+            inputPolicyBuildStarted = true;
             engine = SimulationEngine.getInstance();
             engine.reset();
             if (params != null) {
@@ -1217,7 +1218,20 @@ public class SimulationServer {
 
 
     // Handle user interaction with the model input hierarchy.
+    // Session lifetime: Reset must not erase the fact that a Build has started.
+    private static boolean inputPolicyBuildStarted;
+
+    private static String inputReadOnlyReason(File file) throws Exception {
+        Object builder = Class.forName(startClassName).getDeclaredConstructor().newInstance();
+        if (!(builder instanceof microsim.input.InputEditingPolicy policy)) return null;
+        String relative = new File("input").getCanonicalFile().toPath()
+                .relativize(file.getCanonicalFile().toPath()).toString().replace(File.separatorChar, '/');
+        return policy.inputReadOnlyReason(relative, new microsim.input.InputEditingPolicy.State(
+                engine != null && engine.getModelBuildStatus(), inputPolicyBuildStarted));
+    }
+
     private static void handleInputList(Context ctx) {
+        lock.readLock().lock();
         try {
             if (!requireDataToken(ctx)) return;
             String path = ctx.queryParam("path");
@@ -1225,15 +1239,25 @@ public class SimulationServer {
             List<Map<String, Object>> files = recursive
                 ? InputFileUtils.listVisibleInputFilesRecursively(new File("input"))
                 : InputFileUtils.listVisibleInputEntries(new File("input"), path);
+            List<Map<String, Object>> described = new ArrayList<>();
+            for (var entry : files) {
+                var item = new java.util.LinkedHashMap<String, Object>(entry);
+                if ("file".equals(entry.get("kind"))) {
+                    String reason = inputReadOnlyReason(new File("input", (String) entry.get("path")));
+                    item.put("editable", reason == null);
+                    if (reason != null) item.put("readOnlyReason", reason);
+                }
+                described.add(item);
+            }
             ctx.json(Map.of(
                 "path", path == null ? "" : path,
-                "files", files
+                "files", described
             ));
         } catch (IllegalArgumentException e) {
             ctx.status(400).json(Map.of("error", e.getMessage()));
         } catch (Exception e) {
             ApiErrors.handleError(ctx, e, DIAGNOSTIC_SINK);
-        }
+        } finally { lock.readLock().unlock(); }
     }
 
 
@@ -1307,6 +1331,11 @@ public class SimulationServer {
                 return;
             }
 
+            String readOnlyReason = inputReadOnlyReason(file);
+            if (readOnlyReason != null) {
+                ctx.status(403).json(Map.of("code", "input_read_only", "error", readOnlyReason));
+                return;
+            }
             try (java.io.InputStream in = ctx.bodyInputStream()) {
                 InputFileUtils.replaceInputFile(file, in);
             }
