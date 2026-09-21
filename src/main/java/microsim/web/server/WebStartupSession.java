@@ -13,7 +13,7 @@ public final class WebStartupSession {
     private final WebStartupProvider provider;
     private String state = "required", message = "Choose startup options.";
     private String token;
-    private Map<String, Boolean> choices;
+    private Map<String, Object> choices;
     private Map<String, Object> reviewed;
     private boolean buildStarted;
 
@@ -25,14 +25,15 @@ public final class WebStartupSession {
             catch (Exception e) { state = "required"; message = e.getMessage(); }
         }
         return Map.of("supported", true, "state", state, "message", message,
-                "locked", buildStarted, "definition", provider.describe());
+                "locked", buildStarted, "definition", provider.describe(), "selection", choices == null ? Map.of() : choices);
     }
 
-    public synchronized Map<String, Object> review(Map<String, Boolean> selected) throws Exception {
+    public synchronized Map<String, Object> review(Map<String, ?> selected) throws Exception {
         if (buildStarted || state.equals("preparing"))
             throw new IllegalStateException("Startup cannot be changed after Build starts or during preparation.");
-        var copy = Map.copyOf(selected);
-        var result = provider.review(copy);
+        Map<String, Object> copy = new LinkedHashMap<>(selected);
+        copy = Collections.unmodifiableMap(copy);
+        var result = provider.reviewRequest(copy);
         choices = copy;
         reviewed = new LinkedHashMap<>(result);
         token = UUID.randomUUID().toString();
@@ -41,12 +42,25 @@ public final class WebStartupSession {
         return Map.of("token", token, "review", reviewed);
     }
 
+    public synchronized void upload(String path, java.io.InputStream body) throws Exception {
+        if (buildStarted || state.equals("preparing"))
+            throw new IllegalStateException("Startup uploads are locked after Build starts or during preparation.");
+        token = null;
+        state = "required";
+        provider.upload(path, body);
+        message = "Candidate uploaded. Review the selected operations before preparation.";
+    }
+
+    public synchronized void discardUploads() throws Exception {
+        if (buildStarted || state.equals("preparing")) throw new IllegalStateException("Startup inputs are locked");
+        token = null; state = "required"; provider.discardUploads();
+    }
     /** Cancel is client-side: review has no model or filesystem side effects. */
     public synchronized void confirm(String suppliedToken, Executor executor, Lock lock,
             Consumer<String> logger) throws Exception {
         if (buildStarted || state.equals("preparing") || token == null || !token.equals(suppliedToken))
             throw new IllegalStateException("Startup review expired. Review the choices again.");
-        if (!reviewed.equals(provider.review(choices))) {
+        if (!reviewed.equals(provider.reviewRequest(choices))) {
             token = null;
             throw new IllegalStateException("Startup inputs changed. Review the choices again.");
         }
@@ -59,9 +73,9 @@ public final class WebStartupSession {
             executor.execute(() -> {
                 lock.lock();
                 try {
-                    if (!expected.equals(provider.review(selected)))
+                    if (!expected.equals(provider.reviewRequest(selected)))
                         throw new IllegalStateException("Startup inputs changed. Review the choices again.");
-                    provider.prepare(selected, text -> {
+                    provider.prepareRequest(selected, text -> {
                         synchronized (this) { message = text; }
                         logger.accept(text);
                     });

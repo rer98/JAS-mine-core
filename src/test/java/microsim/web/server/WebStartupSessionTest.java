@@ -64,4 +64,16 @@ class WebStartupSessionTest {
         assertEquals(0, p.writes);
         assertEquals("failed", s.status().get("state"));
     }
+    @Test void uploadInvalidatesReviewAndCannotRunDuringPreparationOrAfterBuild() throws Exception {
+        var p = new Provider() { public void upload(String path, java.io.InputStream body) { version++; } };
+        var session = new WebStartupSession(p);
+        String stale = (String)session.review(Map.of()).get("token");
+        session.upload("file", java.io.InputStream.nullInputStream());
+        assertThrows(IllegalStateException.class, () -> session.confirm(stale, Runnable::run, new ReentrantLock(), x -> {}));
+        var jobs = new ArrayList<Runnable>();
+        session.confirm((String)session.review(Map.of()).get("token"), jobs::add, new ReentrantLock(), x -> {});
+        assertThrows(IllegalStateException.class, () -> session.upload("file", java.io.InputStream.nullInputStream()));
+        jobs.getFirst().run(); session.buildStarting();
+        assertThrows(IllegalStateException.class, () -> session.upload("file", java.io.InputStream.nullInputStream()));
+    }
 }

@@ -237,8 +237,30 @@ public class SimulationServer {
             config.routes.post("/simulation/storage/delete", ctx -> handleCleanup(ctx, true));
             config.routes.post("/simulation/build", SimulationServer::handleBuild);
             config.routes.get("/simulation/startup", ctx -> {
-                if (requireDataToken(ctx)) ctx.json(startupSession == null
-                        ? Map.of("supported", false) : startupSession.status());
+                if (requireDataToken(ctx)) {
+                    var status = startupSession == null ? Map.<String,Object>of("supported", false) : startupSession.status();
+                    if ("ready".equals(status.get("state")) && Boolean.FALSE.equals(status.get("locked"))) cachedParameters = null;
+                    ctx.json(status);
+                }
+            });
+            config.routes.post("/simulation/startup/discard-uploads", ctx -> {
+                if (!requireDataToken(ctx)) return;
+                if (startupSession == null) { ApiErrors.jsonError(ctx, 404, "No model startup choices"); return; }
+                if (!lock.writeLock().tryLock()) { ApiErrors.jsonError(ctx, 409, "Model is busy"); return; }
+                try { startupSession.discardUploads(); ctx.json(Map.of("status", "discarded")); }
+                catch (Exception e) { ApiErrors.jsonError(ctx, 400, e.getMessage()); }
+                finally { lock.writeLock().unlock(); }
+            });
+            config.routes.post("/simulation/startup/upload", ctx -> {
+                if (!requireDataToken(ctx)) return;
+                if (startupSession == null) { ApiErrors.jsonError(ctx, 404, "No model startup choices"); return; }
+                if (!lock.writeLock().tryLock()) { ApiErrors.jsonError(ctx, 409, "Model is busy"); return; }
+                try (var body = ctx.bodyInputStream()) {
+                    startupSession.upload(ctx.queryParam("path"), body);
+                    cachedParameters = null;
+                    ctx.json(Map.of("status", "uploaded"));
+                } catch (Exception e) { ApiErrors.jsonError(ctx, 400, e.getMessage()); }
+                finally { lock.writeLock().unlock(); }
             });
             config.routes.post("/simulation/startup/review", ctx -> handleStartup(ctx, false));
             config.routes.post("/simulation/startup/confirm", ctx -> handleStartup(ctx, true));
@@ -723,12 +745,13 @@ public class SimulationServer {
                 ctx.json(Map.of("state", "preparing"));
             } else {
                 if (!(body.get("choices") instanceof Map<?, ?> supplied)) throw new IllegalArgumentException("Missing choices");
-                Map<String, Boolean> choices = new LinkedHashMap<>();
+                Map<String, Object> choices = new LinkedHashMap<>();
                 for (var entry : supplied.entrySet()) {
-                    if (!(entry.getKey() instanceof String key) || !(entry.getValue() instanceof Boolean value))
-                        throw new IllegalArgumentException("Expected boolean startup choices");
-                    choices.put(key, value);
+                    if (!(entry.getKey() instanceof String key))
+                        throw new IllegalArgumentException("Expected named startup choices");
+                    choices.put(key, entry.getValue());
                 }
+                cachedParameters = null;
                 ctx.json(startupSession.review(choices));
             }
         } catch (Exception e) { ApiErrors.jsonError(ctx, 409, e.getMessage()); }
