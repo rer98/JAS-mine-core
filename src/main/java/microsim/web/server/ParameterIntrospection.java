@@ -3,6 +3,7 @@ package microsim.web.server;
 import microsim.annotation.GUIparameter;
 
 import java.lang.reflect.Field;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -56,7 +57,10 @@ public final class ParameterIntrospection {
                     Map<String, Object> paramInfo = new HashMap<>();
                     paramInfo.put("name", field.getName());
                     paramInfo.put("type", field.getType().getSimpleName());
-                    paramInfo.put("value", field.get(target));
+                    Object value = field.get(target);
+                    // JSON numbers would lose long precision in browser Number values.
+                    paramInfo.put("value", value instanceof Long ? value.toString()
+                            : value instanceof Enum<?> e ? e.name() : value);
                     paramInfo.put("description", annotation.description());
                     paramInfo.put("runtimeModifiable", annotation.runtimeModifiable());
 
@@ -64,7 +68,7 @@ public final class ParameterIntrospection {
                         Object[] enumConstants = field.getType().getEnumConstants();
                         List<String> options = new ArrayList<>();
                         for (Object ec : enumConstants) {
-                            options.add(ec.toString());
+                            options.add(((Enum<?>) ec).name());
                         }
                         paramInfo.put("options", options);
                     }
@@ -84,20 +88,32 @@ public final class ParameterIntrospection {
     public static Object convertValue(Field field, Object value) {
         Class<?> type = field.getType();
         try {
-            if (type.equals(Integer.class) || type.equals(int.class)) {
-                Number n = (Number) value;
-                if (n.doubleValue() % 1 != 0) throw new IllegalArgumentException("fractional value is not valid for type " + type.getSimpleName());
-                return n.intValue();
-            } else if (type.equals(Double.class) || type.equals(double.class)) {
-                return ((Number) value).doubleValue();
-            } else if (type.equals(Float.class) || type.equals(float.class)) {
-                return ((Number) value).floatValue();
+            if (type.equals(Byte.class) || type.equals(byte.class)) {
+                return integerValue(value).byteValueExact();
+            } else if (type.equals(Short.class) || type.equals(short.class)) {
+                return integerValue(value).shortValueExact();
+            } else if (type.equals(Integer.class) || type.equals(int.class)) {
+                return integerValue(value).intValueExact();
             } else if (type.equals(Long.class) || type.equals(long.class)) {
-                Number n = (Number) value;
-                if (n.doubleValue() % 1 != 0) throw new IllegalArgumentException("fractional value is not valid for type " + type.getSimpleName());
-                return n.longValue();
+                return integerValue(value).longValueExact();
+            } else if (type.equals(Double.class) || type.equals(double.class)) {
+                double result = ((Number) value).doubleValue();
+                if (!Double.isFinite(result)) throw new IllegalArgumentException("must be finite");
+                if (result == 0 && new BigDecimal(value.toString()).signum() != 0)
+                    throw new IllegalArgumentException("outside double range");
+                return result;
+            } else if (type.equals(Float.class) || type.equals(float.class)) {
+                float result = ((Number) value).floatValue();
+                if (!Float.isFinite(result) || (result == 0 && new BigDecimal(value.toString()).signum() != 0))
+                    throw new IllegalArgumentException("outside float range");
+                return result;
+            } else if (type.equals(Character.class) || type.equals(char.class)) {
+                if (!(value instanceof String text) || text.length() != 1)
+                    throw new IllegalArgumentException("requires one UTF-16 character");
+                return text.charAt(0);
             } else if (type.equals(Boolean.class) || type.equals(boolean.class)) {
-                return (Boolean) value;
+                if (!(value instanceof Boolean)) throw new IllegalArgumentException("requires true or false");
+                return value;
             } else if (type.equals(String.class)) {
                 return value == null ? null : String.valueOf(value);
             } else if (type.isEnum()) {
@@ -107,12 +123,25 @@ public final class ParameterIntrospection {
             } else {
                 throw new IllegalArgumentException("unsupported parameter type " + type.getSimpleName());
             }
-        } catch (ClassCastException | NullPointerException e) {
+        } catch (ClassCastException | NullPointerException | ArithmeticException e) {
             throw new IllegalArgumentException("value '" + value + "' is not valid for type " + type.getSimpleName());
         } catch (IllegalArgumentException e) {
             // e.g. Enum.valueOf with an unknown constant
-            throw new IllegalArgumentException("value '" + value + "' is not valid for type " + type.getSimpleName());
+            throw new IllegalArgumentException("value '" + value + "' is not valid for type " + type.getSimpleName() + ": " + e.getMessage());
         }
+    }
+
+    /** Accept exact decimal strings as well as legacy JSON numbers; never truncate. */
+    private static BigDecimal integerValue(Object value) {
+        if (!(value instanceof Number) && !(value instanceof String))
+            throw new IllegalArgumentException("requires an integer");
+        if (value instanceof String text && !text.matches("[+-]?[0-9]+"))
+            throw new IllegalArgumentException("requires a decimal integer string");
+        BigDecimal decimal = new BigDecimal(value.toString());
+        // A browser may have rounded a large integer before JSON serialization.
+        if (value instanceof Number && decimal.abs().compareTo(new BigDecimal("9007199254740991")) > 0)
+            throw new IllegalArgumentException("send large integers as decimal strings");
+        return decimal;
     }
 
     /**

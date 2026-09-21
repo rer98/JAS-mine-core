@@ -5,13 +5,11 @@ import java.io.OutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.ArrayDeque;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
@@ -38,12 +36,13 @@ public class SimulationLogBuffer {
     private static final String LOG_OUTPUT_RUN_PREFIX = "--- Output run: ";
 
     private final int maxLines;
-    private final ConcurrentLinkedQueue<String> logBuffer = new ConcurrentLinkedQueue<>();
+    private final ArrayDeque<String> logBuffer = new ArrayDeque<>();
+    private final Object bufferLock = new Object();
     /** Monotonic counter for the index of the oldest line still in {@link #logBuffer}.
      *  Incremented whenever a line is dropped due to the buffer reaching {@link #maxLines}.
      *  Combined with the buffer's current length, this gives a stable global line index that
      *  clients can use as a {@code since} cursor across buffer rollovers. */
-    private final AtomicLong firstLogIndex = new AtomicLong(0L);
+    private long firstLogIndex = 0L; // Guarded by bufferLock, together with logBuffer.
 
     public SimulationLogBuffer(int maxLines) {
         if (maxLines < 1) throw new IllegalArgumentException("maxLines must be positive");
@@ -51,11 +50,20 @@ public class SimulationLogBuffer {
     }
 
     public void add(String message) {
-        logBuffer.offer(message);
-        if (logBuffer.size() > maxLines) {
-            if (logBuffer.poll() != null) {
-                firstLogIndex.incrementAndGet();
+        synchronized (bufferLock) {
+            logBuffer.addLast(message);
+            if (logBuffer.size() > maxLines) {
+                logBuffer.removeFirst();
+                firstLogIndex++;
             }
+        }
+    }
+
+    private record Snapshot(List<String> lines, long firstIndex) {}
+
+    private Snapshot snapshot() {
+        synchronized (bufferLock) {
+            return new Snapshot(new ArrayList<>(logBuffer), firstLogIndex);
         }
     }
 
@@ -90,46 +98,38 @@ public class SimulationLogBuffer {
     }
 
     public Map<String, Object> poll(long since) {
-        // Read array first, then firstLogIndex: under concurrent rotation this risks at
-        // worst a small number of duplicated lines being sent (never silent gaps).
-        String[] logs = logBuffer.toArray(new String[0]);
-        long first = firstLogIndex.get();
-
-        int start = (int) Math.max(0L, since - first);
-        if (start > logs.length) start = logs.length;
-
-        List<String> newLogs = new ArrayList<>();
-        for (int i = start; i < logs.length; i++) {
-            newLogs.add(logs[i]);
-        }
+        Snapshot snapshot = snapshot();
+        List<String> logs = snapshot.lines();
+        long first = snapshot.firstIndex();
+        int start = since <= first ? 0 : (int) Math.min(since - first, logs.size());
+        List<String> newLogs = logs.subList(start, logs.size());
 
         return Map.of(
             "logs", redactLogLines(newLogs),
             "firstIndex", first,
-            "nextIndex", first + logs.length
+            "nextIndex", first + logs.size()
         );
     }
 
     private static class LogScope {
+        final long firstIndex;
         final List<String> all;
         final List<String> current;
         final int start;
         final String outputRun;
 
-        LogScope(List<String> all, int start, String outputRun) {
-            this.all = all;
+        LogScope(Snapshot snapshot, int start, String outputRun) {
+            this.firstIndex = snapshot.firstIndex();
+            this.all = snapshot.lines();
             this.start = start;
-            this.current = all.subList(start, all.size());
+            this.current = this.all.subList(start, this.all.size());
             this.outputRun = outputRun;
         }
     }
 
-    private List<String> currentLogSnapshot() {
-        return new ArrayList<>(Arrays.asList(logBuffer.toArray(new String[0])));
-    }
-
     private LogScope currentRunLogScope() {
-        List<String> logs = currentLogSnapshot();
+        Snapshot snapshot = snapshot();
+        List<String> logs = snapshot.lines();
         int start = 0;
         String outputRun = null;
         for (int i = logs.size() - 1; i >= 0; i--) {
@@ -147,7 +147,7 @@ public class SimulationLogBuffer {
                 break;
             }
         }
-        return new LogScope(logs, start, outputRun);
+        return new LogScope(snapshot, start, outputRun);
     }
 
     private static List<String> redactLogLines(List<String> lines) {
@@ -163,7 +163,7 @@ public class SimulationLogBuffer {
 
     public Map<String, Object> tail(int maxLines) {
         LogScope scope = currentRunLogScope();
-        long first = firstLogIndex.get();
+        long first = scope.firstIndex;
         int start = Math.max(0, scope.current.size() - maxLines);
         List<String> lines = redactLogLines(scope.current.subList(start, scope.current.size()));
         Map<String, Object> out = new LinkedHashMap<>();
@@ -184,7 +184,7 @@ public class SimulationLogBuffer {
             throws PatternSyntaxException {
         LogScope scope = currentRunLogScope();
         List<String> logs = scope.current;
-        long first = firstLogIndex.get() + scope.start;
+        long first = scope.firstIndex + scope.start;
         List<Map<String, Object>> matches = new ArrayList<>();
         Pattern pat = null;
         String q = useCase ? query : query.toLowerCase(Locale.ROOT);
@@ -214,7 +214,7 @@ public class SimulationLogBuffer {
         out.put("searchedLines", logs.size());
         out.put("firstIndex", first);
         out.put("scopeStartIndex", first);
-        out.put("nextIndex", firstLogIndex.get() + scope.all.size());
+        out.put("nextIndex", scope.firstIndex + scope.all.size());
         out.put("outputRun", scope.outputRun);
         out.put("truncatedMatches", matches.size() >= maxMatches);
         out.put("note", "Current-run console log search, scoped from the latest Building New Simulation marker when present. Secrets/tokens/password-like values are redacted heuristically.");

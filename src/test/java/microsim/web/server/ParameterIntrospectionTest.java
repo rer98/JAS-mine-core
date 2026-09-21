@@ -103,7 +103,7 @@ public class ParameterIntrospectionTest {
             .findFirst()
             .orElseThrow();
         assertEquals("Mode", mode.get("type"));
-        assertEquals(Mode.LOW, mode.get("value"));
+        assertEquals("LOW", mode.get("value"));
         assertEquals("mode parameter", mode.get("description"));
         assertTrue((Boolean) mode.get("runtimeModifiable"));
         assertEquals(List.of("LOW", "HIGH"), mode.get("options"));
