@@ -20,14 +20,20 @@ public final class StartupUploads {
         Files.createDirectories(target.getParent());
         long used;
         try (var files = Files.walk(root)) {
+            if (!Files.exists(target) && files.filter(Files::isRegularFile).limit(UploadLimits.CANDIDATE_FILES).count() >= UploadLimits.CANDIDATE_FILES)
+                throw new UploadLimits.LimitException(413, "Too many candidate files; remove unused candidates.");
+        }
+        try (var files = Files.walk(root)) {
             used = files.filter(Files::isRegularFile).mapToLong(p -> p.toFile().length()).sum();
         }
-        long available = Math.min(fileLimit, Math.min(totalLimit - used + (Files.isRegularFile(target) ? Files.size(target) : 0),
-                Files.getFileStore(root).getUsableSpace() - freeReserve));
+        long candidateLimit = Math.min(fileLimit, totalLimit - used + (Files.isRegularFile(target) ? Files.size(target) : 0));
+        long space = Files.getFileStore(root).getUsableSpace() - freeReserve;
         var session = SessionStorage.fromEnvironment().status();
         if (Boolean.TRUE.equals(session.get("enabled")))
-            available = Math.min(available, ((Number)session.get("remainingBytes")).longValue() - freeReserve);
-        if (available <= 0) throw new IOException("Insufficient space for startup uploads; remove candidates or free session storage.");
+            space = Math.min(space, ((Number)session.get("remainingBytes")).longValue() - freeReserve);
+        long available = Math.min(candidateLimit, space);
+        int limitStatus = space < candidateLimit ? 507 : 413;
+        if (available <= 0) throw new UploadLimits.LimitException(limitStatus, "Insufficient capacity for startup uploads; remove candidates or free session storage.");
         Path temp = Files.createTempFile(root, ".upload-", ".part");
         try {
             try (var out = Files.newOutputStream(temp)) {
@@ -35,11 +41,12 @@ public final class StartupUploads {
                 long count = 0;
                 for (int n; (n = body.read(buffer)) != -1;) {
                     count += n;
-                    if (count > available) throw new IOException("Upload exceeds file, candidate-storage or free-space limit");
+                    if (count > available) throw new UploadLimits.LimitException(limitStatus, "Upload exceeds file, candidate-storage or free-space limit; existing candidate retained.");
                     out.write(buffer, 0, n);
                 }
                 if (count == 0) throw new IOException("Empty uploads are not accepted");
             }
+            WorkbookBudget.validate(temp, target.getFileName().toString());
             Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
         } finally { Files.deleteIfExists(temp); }
     }

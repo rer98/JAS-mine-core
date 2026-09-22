@@ -109,12 +109,13 @@ public class InputFileUtilsTest {
     @Test
     public void replaceDirectWritesViaTemporaryFile() throws Exception {
         Path dir = Files.createTempDirectory("input-file-utils-direct");
-        Path target = dir.resolve("config.xls");
+        Path target = dir.resolve("config.xlsx");
         Files.writeString(target, "old", StandardCharsets.UTF_8);
 
-        InputFileUtils.replaceInputFile(target.toFile(), new ByteArrayInputStream("new".getBytes(StandardCharsets.UTF_8)));
+        byte[] replacement = zip("xl/worksheets/sheet1.xml", "<worksheet><sheetData/></worksheet>");
+        InputFileUtils.replaceInputFile(target.toFile(), new ByteArrayInputStream(replacement));
 
-        assertEquals("new", Files.readString(target, StandardCharsets.UTF_8));
+        assertArrayEquals(replacement, Files.readAllBytes(target));
     }
 
     @Test

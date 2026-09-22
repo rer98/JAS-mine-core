@@ -31,6 +31,10 @@ import java.util.regex.PatternSyntaxException;
 public class SimulationLogBuffer {
     public static final int DEFAULT_MAX_LINES = 100_000;
     public static final int DEFAULT_MAX_REGEX_LENGTH = 500;
+    public static final int MAX_BYTES = 32 * 1024 * 1024;
+    public static final int MAX_LINE_BYTES = 64 * 1024;
+    private static final String TRUNCATED = " [line truncated at console limit]";
+    private int retainedBytes;
 
     private static final String LOG_RUN_MARKER = "--- Building New Simulation";
     private static final String LOG_OUTPUT_RUN_PREFIX = "--- Output run: ";
@@ -50,10 +54,17 @@ public class SimulationLogBuffer {
     }
 
     public void add(String message) {
+        message = message == null ? "" : message;
+        // Bound conversion itself when a caller supplies a very large String.
+        if (message.length() > MAX_LINE_BYTES) message = message.substring(0, MAX_LINE_BYTES) + TRUNCATED;
+        byte[] encoded = message.getBytes(StandardCharsets.UTF_8);
+        if (encoded.length > MAX_LINE_BYTES)
+            message = new String(encoded, 0, MAX_LINE_BYTES - 128, StandardCharsets.UTF_8) + TRUNCATED;
         synchronized (bufferLock) {
             logBuffer.addLast(message);
-            if (logBuffer.size() > maxLines) {
-                logBuffer.removeFirst();
+            retainedBytes += message.getBytes(StandardCharsets.UTF_8).length + 1;
+            while (logBuffer.size() > maxLines || retainedBytes > MAX_BYTES) {
+                retainedBytes -= logBuffer.removeFirst().getBytes(StandardCharsets.UTF_8).length + 1;
                 firstLogIndex++;
             }
         }
@@ -80,6 +91,7 @@ public class SimulationLogBuffer {
     private class LineCapturingOutputStream extends OutputStream {
         private final ByteArrayOutputStream buf = new ByteArrayOutputStream();
         private final PrintStream passthrough;
+        private boolean truncated;
 
         LineCapturingOutputStream(PrintStream passthrough) {
             this.passthrough = passthrough;
@@ -87,12 +99,14 @@ public class SimulationLogBuffer {
 
         @Override public synchronized void write(int b) {
             if (b == '\n') {
-                String line = buf.toString(StandardCharsets.UTF_8);
+                String line = buf.toString(StandardCharsets.UTF_8) + (truncated ? TRUNCATED : "");
                 add(line);
                 passthrough.println(line);
                 buf.reset();
+                truncated = false;
             } else {
-                buf.write(b);
+                if (buf.size() < MAX_LINE_BYTES - 128) buf.write(b);
+                else truncated = true;
             }
         }
     }
@@ -107,7 +121,10 @@ public class SimulationLogBuffer {
         return Map.of(
             "logs", redactLogLines(newLogs),
             "firstIndex", first,
-            "nextIndex", first + logs.size()
+            "nextIndex", first + logs.size(),
+            "truncatedBefore", since < first,
+            "maxBytes", MAX_BYTES,
+            "maxLineBytes", MAX_LINE_BYTES
         );
     }
 

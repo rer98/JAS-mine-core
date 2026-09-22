@@ -28,10 +28,20 @@ public final class CsvRecordReader implements AutoCloseable {
     private final PushbackReader in;
     private final char delim;
     private boolean eof = false;
+    private final int maxRecord;
+    private final int maxField;
+    private final int maxColumns;
 
     public CsvRecordReader(Reader reader, char delim) {
+        this(reader, delim, Integer.MAX_VALUE, Integer.MAX_VALUE, Integer.MAX_VALUE);
+    }
+
+    public CsvRecordReader(Reader reader, char delim, int maxRecord, int maxField, int maxColumns) {
         this.in = new PushbackReader(new BufferedReader(reader), 1);
         this.delim = delim;
+        this.maxRecord = maxRecord;
+        this.maxField = maxField;
+        this.maxColumns = maxColumns;
     }
 
     public List<String> readRecord() throws IOException {
@@ -41,7 +51,10 @@ public final class CsvRecordReader implements AutoCloseable {
         boolean inQuotes = false;
         boolean anyContent = false;
         int c;
+        int size = 0;
         while (true) {
+            if (++size > maxRecord || field.length() > maxField || fields.size() >= maxColumns)
+                throw new IOException("Tabular record exceeds the record, field or column limit");
             c = in.read();
             if (c == -1) {
                 eof = true;

@@ -199,7 +199,26 @@ public class SimulationServer {
             message -> System.out.println(message)
         );
 
+        var backendAuth = new microsim.web.server.BackendAuth(System.getenv());
         Javalin app = Javalin.create(config -> {
+            config.http.maxRequestSize = 1024 * 1024;
+            config.routes.after(ctx -> microsim.web.server.SafeDiagnostics.request(ctx.path(), ctx.status().getCode()));
+            config.routes.get("/simulation/diagnostics", SimulationServer::handleSafeDiagnostics);
+            config.routes.get("/simulation/upload-limits", ctx -> ctx.json(Map.of(
+                    "fileBytes", microsim.web.server.UploadLimits.FILE_BYTES,
+                    "workbookBytes", microsim.web.server.WorkbookBudget.MAX_FILE_BYTES,
+                    "workbookDecodedBytes", microsim.web.server.WorkbookBudget.MAX_DECODED_BYTES,
+                    "candidateFiles", microsim.web.server.UploadLimits.CANDIDATE_FILES,
+                    "transferSeconds", 600)));
+            config.routes.before(ctx -> {
+                if (!"/health".equals(ctx.path()) && !"OPTIONS".equals(ctx.method().name())
+                        && !backendAuth.accepts(ctx.header(microsim.web.server.BackendAuth.HEADER))
+                        && !validateDataToken(ctx))
+                    throw new io.javalin.http.UnauthorizedResponse("Backend authentication required");
+                long limit = ctx.path().endsWith("/upload") ? microsim.web.server.UploadLimits.FILE_BYTES : 1024 * 1024;
+                if (ctx.req().getContentLengthLong() > limit)
+                    throw new io.javalin.http.HttpResponseException(413, "Request exceeds the allowed size");
+            });
 //            config.plugins.enableCors(cors -> cors.add(it -> {            // For Javalin 5
             config.events.serverStopping(gracefulShutdown::shutdown);
             config.events.serverStopped(gracefulShutdown::shutdown);
@@ -255,11 +274,12 @@ public class SimulationServer {
                 if (!requireDataToken(ctx)) return;
                 if (startupSession == null) { ApiErrors.jsonError(ctx, 404, "No model startup choices"); return; }
                 if (!lock.writeLock().tryLock()) { ApiErrors.jsonError(ctx, 409, "Model is busy"); return; }
-                try (var body = ctx.bodyInputStream()) {
+                try (var body = microsim.web.server.UploadLimits.bounded(ctx.bodyInputStream())) {
                     startupSession.upload(ctx.queryParam("path"), body);
                     cachedParameters = null;
                     ctx.json(Map.of("status", "uploaded"));
-                } catch (Exception e) { ApiErrors.jsonError(ctx, 400, e.getMessage()); }
+                } catch (microsim.web.server.UploadLimits.LimitException e) { ApiErrors.jsonError(ctx, e.status, e.getMessage()); }
+                catch (Exception e) { ApiErrors.jsonError(ctx, 400, e.getMessage()); }
                 finally { lock.writeLock().unlock(); }
             });
             config.routes.post("/simulation/startup/review", ctx -> handleStartup(ctx, false));
@@ -404,7 +424,17 @@ public class SimulationServer {
     private static final SessionStorage storage = SessionStorage.fromEnvironment();
 
     private static void handleHealth(Context ctx) {
-        ctx.json(Map.of("status", "ok", "timestamp", System.currentTimeMillis(), "modelPrefix", modelPrefix));
+        ctx.json(Map.of("status", "ok"));
+    }
+
+    private static void handleSafeDiagnostics(Context ctx) {
+        var result = new java.util.LinkedHashMap<String,Object>(microsim.web.server.SafeDiagnostics.snapshot());
+        if (!lock.readLock().tryLock()) result.put("state", Map.of("status", "busy"));
+        else try {
+            result.put("state", engine == null ? SimulationLifecycleResponses.notInitializedStatus()
+                    : SimulationLifecycleResponses.currentStatus(engine.getRunningStatus(), engine.getTime(), engine.getModelBuildStatus()));
+        } finally { lock.readLock().unlock(); }
+        ctx.json(result);
     }
 
     private static void handlePause(Context ctx) {
@@ -1328,7 +1358,7 @@ public class SimulationServer {
 
     private static void handleInputUpload(Context ctx) {
         if (!requireDataToken(ctx)) return;
-        lock.writeLock().lock();
+        if (!lock.writeLock().tryLock()) { ApiErrors.jsonError(ctx, 409, "Model is busy; retry upload later"); return; }
         try {
             if (engine != null && engine.getModelBuildStatus()) {
                 ctx.status(409).json(Map.of("error", "Input files can only be changed before Build. Reset before changing input files."));
@@ -1365,6 +1395,8 @@ public class SimulationServer {
             // An uploaded input file may change @GUIparameter defaults.
             cachedParameters = null;
             ctx.json(Map.of("status", "uploaded", "path", path));
+        } catch (microsim.web.server.UploadLimits.LimitException e) {
+            ApiErrors.jsonError(ctx, e.status, e.getMessage());
         } catch (IllegalArgumentException e) {
             ctx.status(400).json(Map.of("error", e.getMessage()));
         } catch (Exception e) {

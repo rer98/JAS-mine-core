@@ -137,6 +137,7 @@ public final class InputFileUtils {
     }
 
     public static void replaceInputFile(File target, InputStream in) throws IOException {
+        in = UploadLimits.bounded(in);
         if (target.getName().endsWith(".db")) replaceDatabaseFromZip(target, in);
         else replaceDirect(target, in);
     }
@@ -151,7 +152,7 @@ public final class InputFileUtils {
                 throw new IllegalArgumentException("Zip entry must match target filename");
             }
             try (var out = Files.newOutputStream(temp)) {
-                zis.transferTo(out);
+                UploadLimits.copy(zis, out, UploadLimits.available(temp.getParent(), UploadLimits.FILE_BYTES));
             }
             if (zis.getNextEntry() != null) {
                 throw new IllegalArgumentException("Zip upload must contain exactly one file");
@@ -166,8 +167,9 @@ public final class InputFileUtils {
         Path temp = Files.createTempFile(target.toPath().getParent(), target.getName(), ".upload");
         try {
             try (var out = Files.newOutputStream(temp)) {
-                in.transferTo(out);
+                UploadLimits.copy(in, out, UploadLimits.available(temp.getParent(), UploadLimits.FILE_BYTES));
             }
+            WorkbookBudget.validate(temp, target.getName());
             Files.move(temp, target.toPath(), StandardCopyOption.REPLACE_EXISTING);
         } finally {
             Files.deleteIfExists(temp);

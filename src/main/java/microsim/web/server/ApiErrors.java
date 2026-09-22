@@ -52,6 +52,7 @@ public final class ApiErrors {
 
     public static String reportDiagnostic(PrintStream diagnosticSink, String context, Throwable error) {
         String errorId = UUID.randomUUID().toString();
+        SafeDiagnostics.incident(errorId);
         writeDiagnostic(diagnosticSink, errorId, context, error);
         return errorId;
     }
