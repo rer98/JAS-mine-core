@@ -70,6 +70,12 @@
   </build>
 
   <dependencies>
+    <!-- Parse DB Explorer SQL without evaluating it; upgrades require the SQL safety suite. -->
+    <dependency>
+      <groupId>com.github.jsqlparser</groupId>
+      <artifactId>jsqlparser</artifactId>
+      <version>5.4</version>
+    </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>

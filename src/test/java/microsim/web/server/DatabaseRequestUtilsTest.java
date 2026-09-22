@@ -57,7 +57,7 @@ public class DatabaseRequestUtilsTest {
 
             assertEquals("out.mv.db", target.getDbFile().getName());
             assertTrue(target.getDir().getPath().replace('\\', '/').endsWith("output/" + timestamp + "/database"));
-            assertTrue(target.getJdbcUrl().contains("/out;ACCESS_MODE_DATA=r;"));
+            assertTrue(target.getJdbcUrl().contains("/out;IFEXISTS=TRUE;ACCESS_MODE_DATA=r"));
         } finally {
             deleteTree(Paths.get("output", timestamp));
         }

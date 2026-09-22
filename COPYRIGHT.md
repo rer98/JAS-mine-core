@@ -91,3 +91,10 @@ Upstream baseline used to identify new files: `5a5b2db00bc379b53e6e2d946896c5fb4
 ## Artifacts attributed here without modifying their contents
 
 None.
+
+## Pinned SQL parser
+
+JSQLParser 5.4 is a third-party dependency, distributed under its Apache-2.0
+license option. `src/main/resources/META-INF/licenses/JSQLParser-5.4.md` records
+provenance and includes that license in the core and downstream shaded jars.
+Its upstream copyright notices and ownership are unchanged.

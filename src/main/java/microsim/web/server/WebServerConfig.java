@@ -57,8 +57,8 @@ public final class WebServerConfig {
         this.corsAllowedHosts = corsAllowedHosts;
         this.detailedDataAccessAllowed = detailedDataAccessAllowed;
         this.requiresAuth = requiresAuth;
-        this.dbQueryMaxRows = dbQueryMaxRows;
-        this.dbQueryTimeoutSeconds = dbQueryTimeoutSeconds;
+        this.dbQueryMaxRows = DatabaseQueryUtils.rowLimit(dbQueryMaxRows);
+        this.dbQueryTimeoutSeconds = DatabaseQueryUtils.timeLimit(dbQueryTimeoutSeconds);
         this.modelId = modelId;
         this.simId = simId;
         this.hardResetSecret = hardResetSecret;

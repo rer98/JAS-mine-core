@@ -1397,13 +1397,10 @@ public class SimulationServer {
                 return;
             }
 
-            // Read-only: allow SELECT and WITH/CTE result-set queries only.
-            if (!SqlSafety.isAllowedReadOnlyQuery(request.getSql())) {
-                ctx.status(400).json(Map.of("error", "Only SELECT or WITH/CTE read-only queries are allowed. Use INFORMATION_SCHEMA.TABLES to list tables and INFORMATION_SCHEMA.COLUMNS to list columns; SHOW and DESCRIBE are not supported."));
-                return;
-            }
-            if (SqlSafety.hasMultipleStatements(request.getSql())) {
-                ctx.status(400).json(Map.of("error", "Only a single read-only query is allowed"));
+            try {
+                SqlSafety.check(request.getSql());
+            } catch (IllegalArgumentException e) {
+                ctx.status(400).json(Map.of("error", e.getMessage()));
                 return;
             }
 
@@ -1416,19 +1413,29 @@ public class SimulationServer {
             } catch (DatabaseFileUtils.AmbiguousDatabaseFileException e) {
                 ctx.status(400).json(Map.of("error", e.getMessage(), "files", e.getFiles()));
                 return;
+            } catch (java.io.IOException e) {
+                ctx.status(400).json(Map.of("error", "The selected database cannot be opened safely. Check its file path and H2 format with the model developer."));
+                return;
             } catch (IllegalArgumentException e) {
                 ctx.status(400).json(Map.of("error", e.getMessage()));
                 return;
             }
 
             try {
-                ctx.json(DatabaseQueryUtils.executeQuery(target.getJdbcUrl(), request.getSql(), dbQueryMaxRows, dbQueryTimeoutSeconds));
+                ctx.json("output".equals(request.getRole())
+                    ? DatabaseQueryUtils.executeOutputQuery(DatabaseFileUtils.databaseBase(target.getDir(), target.getDbFile()),
+                        request.getSql(), dbQueryMaxRows, dbQueryTimeoutSeconds)
+                    : DatabaseQueryUtils.executeQuery(target.getJdbcUrl(), request.getSql(), dbQueryMaxRows, dbQueryTimeoutSeconds));
             } catch (SQLException e) {
-                addLogMessage("H2 query error: " + e.getMessage());
-                ctx.status(400).json(Map.of("error", DatabaseQueryUtils.friendlySqlErrorMessage(e, request.getRole())));
+                // H2 exception text can contain SQL and private record values. Publish only safe messages.
+                String message = DatabaseQueryUtils.friendlySqlErrorMessage(e, request.getRole());
+                addLogMessage("Database query rejected: " + message);
+                ctx.status(400).json(Map.of("error", message));
                 return;
             }
 
+        } catch (IllegalArgumentException e) {
+            ctx.status(400).json(Map.of("error", e.getMessage()));
         } catch (Exception e) {
             ApiErrors.handleError(ctx, e, DIAGNOSTIC_SINK);
         }

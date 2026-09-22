@@ -26,6 +26,9 @@ Features: Artificial Intelligence Simulation Social sciences
 
 ## Documentation
 
+For web DB Explorer query restrictions, account setup and result limits, see
+[Web database queries](WEB_DATABASE_QUERIES.md).
+
 The documentation can be generated locally with the following:
 ```sh
 mvn javadoc:javadoc

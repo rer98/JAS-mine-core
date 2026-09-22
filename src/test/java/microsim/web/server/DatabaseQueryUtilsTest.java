@@ -47,41 +47,42 @@ public class DatabaseQueryUtilsTest {
         assertEquals(List.of("ID"), res.get("columns"));
         assertEquals(List.of(List.of(1), List.of(2)), res.get("rows"));
         assertEquals(2, res.get("maxRows"));
-        assertEquals(0, res.get("timeoutSeconds"));
+        assertEquals(60, res.get("timeoutSeconds"));
         assertEquals(true, res.get("truncated"));
     }
 
     @Test
-    public void executeQueryCanDisableMaxRows() throws Exception {
+    public void executeQueryCannotDisableSafetyLimits() throws Exception {
         String jdbcUrl = createDatabase();
 
         Map<String, Object> res = DatabaseQueryUtils.executeQuery(jdbcUrl, "select id from people order by id", 0, 0);
 
         assertEquals(List.of(List.of(1), List.of(2), List.of(3)), res.get("rows"));
         assertEquals(false, res.get("truncated"));
+        assertEquals(5000, res.get("maxRows"));
+        assertEquals(60, res.get("timeoutSeconds"));
     }
 
     @Test
-    public void friendlySqlErrorMessagesPreserveExistingSpecialCases() {
-        assertEquals(
-            "Input database is in H2 1.x format and cannot be read by the current H2 2.x driver. Please migrate the input database to H2 2.x format (input.mv.db).",
-            DatabaseQueryUtils.friendlySqlErrorMessage(new SQLException("boom 90048 old db"), "input")
-        );
-        assertEquals(
-            "Database file could not be found. Please ensure an output database exists in the output directory.",
-            DatabaseQueryUtils.friendlySqlErrorMessage(new SQLException("boom 90028 missing"), "output")
-        );
-        assertEquals("plain error", DatabaseQueryUtils.friendlySqlErrorMessage(new SQLException("plain error"), "input"));
+    public void errorsNeverEchoQueryOrPrivateValues() {
+        String secret = "PRIVATE_RECORD_VALUE";
+        for (SQLException error : List.of(new SQLException(secret), new SQLException(secret, "22018", 22018),
+                new SQLException(secret, "42000", 42000), new SQLException(secret, "90048", 90048))) {
+            assertFalse(DatabaseQueryUtils.friendlySqlErrorMessage(error, "input").contains(secret));
+        }
+        assertTrue(DatabaseQueryUtils.friendlySqlErrorMessage(new SQLException(secret, "JQ001"), "input")
+                .contains("updated image"));
     }
 
     private static String createDatabase() throws Exception {
         Path dir = Files.createTempDirectory("db-query-utils");
-        String jdbcUrl = "jdbc:h2:file:" + dir.resolve("testdb").toAbsolutePath() + ";TRACE_LEVEL_FILE=0";
+        String jdbcUrl = "jdbc:h2:file:" + dir.resolve("testdb").toAbsolutePath();
         try (Connection conn = DriverManager.getConnection(jdbcUrl, "sa", "");
              Statement stmt = conn.createStatement()) {
             stmt.execute("create table people(id int primary key, name varchar(20))");
             stmt.execute("insert into people values(1, 'Alice'), (2, 'Bob'), (3, 'Carol')");
+            DatabaseQueryAccess.provision(conn);
         }
-        return jdbcUrl + ";ACCESS_MODE_DATA=r;FILE_LOCK=NO;TRACE_LEVEL_FILE=0";
+        return jdbcUrl + ";ACCESS_MODE_DATA=r";
     }
 }

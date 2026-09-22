@@ -79,11 +79,13 @@ public final class DatabaseFileUtils {
         );
     }
 
-    public static String h2JdbcUrl(File dir, File dbFile) {
+    public static String h2JdbcUrl(File dir, File dbFile) throws IOException {
+        return DatabaseQueryAccess.url(databaseBase(dir, dbFile), true);
+    }
+
+    public static java.nio.file.Path databaseBase(File dir, File dbFile) throws IOException {
         String filename = dbFile.getName();
-        String base = filename.endsWith(".mv.db")
-            ? filename.substring(0, filename.length() - 6)
-            : filename.substring(0, filename.lastIndexOf(".db"));
-        return "jdbc:h2:file:" + dir.getAbsolutePath() + "/" + base + ";ACCESS_MODE_DATA=r;FILE_LOCK=NO;TRACE_LEVEL_FILE=0";
+        if (!filename.endsWith(".mv.db")) throw new IOException("An H2 2.x .mv.db database is required");
+        return dir.toPath().resolve(filename.substring(0, filename.length() - 6));
     }
 }

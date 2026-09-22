@@ -81,10 +81,18 @@ public class DatabaseFileUtilsTest {
     }
 
     @Test
-    public void h2JdbcUrlStripsExpectedDatabaseSuffixes() throws Exception {
+    public void h2JdbcUrlRequiresExistingLocalDatabaseAndKeepsLocking() throws Exception {
         File dir = Files.createTempDirectory("db-file-utils-url").toFile();
-        assertTrue(DatabaseFileUtils.h2JdbcUrl(dir, new File(dir, "input.mv.db")).contains("/input;ACCESS_MODE_DATA=r;"));
-        assertTrue(DatabaseFileUtils.h2JdbcUrl(dir, new File(dir, "legacy.h2.db")).contains("/legacy.h2;ACCESS_MODE_DATA=r;"));
+        File database = new File(dir, "input.mv.db");
+        Files.writeString(database.toPath(), "fixture");
+        String url = DatabaseFileUtils.h2JdbcUrl(dir, database);
+        assertTrue(url.endsWith("/input;IFEXISTS=TRUE;ACCESS_MODE_DATA=r"));
+        assertFalse(url.contains("FILE_LOCK=NO"));
+        assertThrows(java.io.IOException.class, () -> DatabaseFileUtils.h2JdbcUrl(dir, new File(dir, "missing.mv.db")));
+        assertThrows(java.io.IOException.class, () -> DatabaseFileUtils.h2JdbcUrl(dir, new File(dir, "legacy.h2.db")));
+        File injected = new File(dir, "db;INIT=bad.mv.db");
+        Files.writeString(injected.toPath(), "fixture");
+        assertThrows(java.io.IOException.class, () -> DatabaseFileUtils.h2JdbcUrl(dir, injected));
     }
 
     private static void assertBadDirectory(String role, String timestamp, String message) throws Exception {
