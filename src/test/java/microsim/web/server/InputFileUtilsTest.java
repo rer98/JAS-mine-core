@@ -20,7 +20,7 @@ import org.junit.jupiter.api.Test;
  *
  * Unit tests for InputFileUtils.
  * Verifies safe hierarchical input browsing, detailed-data policy decisions,
- * and atomic direct or zipped file replacement.
+ * atomic supported-file replacement and rejection of native database uploads.
  *
  * @author ross richardson
  *
@@ -119,14 +119,22 @@ public class InputFileUtilsTest {
     }
 
     @Test
-    public void replaceDatabaseAcceptsSingleMatchingZipEntry() throws Exception {
+    public void nativeDatabaseUploadsAreRejectedBeforeReadingOrReplacing() throws Exception {
         Path dir = Files.createTempDirectory("input-file-utils-db");
-        Path target = dir.resolve("input.mv.db");
-        Files.writeString(target, "old", StandardCharsets.UTF_8);
-
-        InputFileUtils.replaceInputFile(target.toFile(), new ByteArrayInputStream(zip("input.mv.db", "new-db")));
-
-        assertEquals("new-db", Files.readString(target, StandardCharsets.UTF_8));
+        for (String name : List.of("input.mv.db", "INPUT.MV.DB", "input.mv.db.zip", "INPUT.DB.ZIP")) {
+            Path target = dir.resolve(name);
+            Files.writeString(target, "old", StandardCharsets.UTF_8);
+            var unreadable = new java.io.InputStream() {
+                @Override public int read() { throw new AssertionError("Rejected uploads must not be read"); }
+            };
+            assertThrows(IllegalArgumentException.class,
+                    () -> InputFileUtils.replaceInputFile(target.toFile(), unreadable));
+            assertEquals("old", Files.readString(target));
+            assertNotNull(InputFileUtils.uploadReadOnlyReason(name));
+        }
+        try (var files = Files.list(dir)) { assertEquals(4, files.count()); }
+        assertNull(InputFileUtils.uploadReadOnlyReason("population.csv"));
+        assertNull(InputFileUtils.uploadReadOnlyReason("parameters.xlsx"));
     }
 
     @Test
@@ -135,9 +143,12 @@ public class InputFileUtilsTest {
         Path target = dir.resolve("input.mv.db");
         Files.writeString(target, "old", StandardCharsets.UTF_8);
 
-        assertBadZip(target, emptyZip(), "Received empty zip file");
-        assertBadZip(target, zip("other.mv.db", "bad"), "Zip entry must match target filename");
-        assertBadZip(target, zipTwoEntries(), "Zip upload must contain exactly one file");
+        String reason = InputFileUtils.uploadReadOnlyReason(target.getFileName().toString());
+        assertBadZip(target, "raw native database".getBytes(StandardCharsets.UTF_8), reason);
+        assertBadZip(target, zip("input.mv.db", "new-db"), reason);
+        assertBadZip(target, emptyZip(), reason);
+        assertBadZip(target, zip("other.mv.db", "bad"), reason);
+        assertBadZip(target, zipTwoEntries(), reason);
         assertEquals("old", Files.readString(target, StandardCharsets.UTF_8));
     }
 

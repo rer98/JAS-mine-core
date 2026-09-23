@@ -20,6 +20,62 @@ import org.junit.jupiter.api.Test;
 
 public class SimulationLogBufferTest {
     @Test
+    void boundedCatchupPagesDoNotSkipRetainedLines() {
+        SimulationLogBuffer logs = new SimulationLogBuffer(7000);
+        for (int i = 0; i < 6500; i++) logs.add("line-" + i);
+        var first = logs.poll(0);
+        assertEquals(5000L, first.get("nextIndex"));
+        assertEquals(true, first.get("hasMore"));
+        var second = logs.poll((Long) first.get("nextIndex"));
+        assertEquals("line-5000", ((List<?>) second.get("logs")).get(0));
+        assertEquals(6500L, second.get("nextIndex"));
+        assertEquals(false, second.get("hasMore"));
+        SimulationLogBuffer large = new SimulationLogBuffer(100);
+        for (int i = 0; i < 100; i++) large.add("x".repeat(60_000));
+        long cursor = 0;
+        int received = 0;
+        while (cursor < 100) {
+            var page = large.poll(cursor);
+            var lines = (List<?>) page.get("logs");
+            assertTrue(lines.stream().mapToLong(line -> ((String) line).length()).sum() <= 2L * 1024 * 1024);
+            assertTrue((Long) page.get("nextIndex") > cursor);
+            cursor = (Long) page.get("nextIndex");
+            received += lines.size();
+        }
+        assertEquals(100, received);
+    }
+
+    @Test
+    void nestedRepetitionFinishesAndUnsupportedRegexFailsClearly() {
+        SimulationLogBuffer logs = new SimulationLogBuffer(10);
+        logs.add("a".repeat(60_000) + "!");
+        assertTimeoutPreemptively(java.time.Duration.ofSeconds(3), () -> {
+            assertEquals(0, logs.search("(a+)+$", true, true, 10, 0).get("returned"));
+        });
+        assertThrows(IllegalArgumentException.class,
+            () -> logs.search("(a)\\1", true, true, 10, 0));
+        assertThrows(IllegalArgumentException.class,
+            () -> logs.search("a(?=b)", true, true, 10, 0));
+        assertThrows(IllegalArgumentException.class,
+            () -> logs.search("(abcdefghijk){1000}", true, true, 10, 0));
+        logs.add("Finished year 2026");
+        assertEquals(1, logs.search("finished year [0-9]+", true, false, 10, 0).get("returned"));
+    }
+
+    @Test
+    void contextAndTailStayBoundedEvenWithLongRepeatedLines() {
+        SimulationLogBuffer logs = new SimulationLogBuffer(1000);
+        for (int i = 0; i < 100; i++) logs.add("x".repeat(60_000));
+        var search = logs.search("x", false, true, 100, 50);
+        assertEquals(true, search.get("budgetLimited"));
+        assertEquals(true, search.get("truncatedMatches"));
+        var tail = logs.tail(Integer.MAX_VALUE);
+        assertEquals(true, tail.get("truncatedBefore"));
+        assertTrue(((List<?>) tail.get("lines")).stream()
+            .mapToLong(line -> ((String) line).length()).sum() <= 2L * 1024 * 1024);
+    }
+
+    @Test
     public void tailScopesToLatestRunAndReportsOutputMarker() {
         SimulationLogBuffer logs = new SimulationLogBuffer(100);
         logs.add("old run line");

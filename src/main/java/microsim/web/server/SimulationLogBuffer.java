@@ -10,8 +10,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.regex.Pattern;
-import java.util.regex.PatternSyntaxException;
+import com.google.re2j.Pattern;
+import com.google.re2j.PatternSyntaxException;
 
 
 /* (C) Copyright 2026, by Ross Richardson
@@ -116,12 +116,23 @@ public class SimulationLogBuffer {
         List<String> logs = snapshot.lines();
         long first = snapshot.firstIndex();
         int start = since <= first ? 0 : (int) Math.min(since - first, logs.size());
-        List<String> newLogs = logs.subList(start, logs.size());
+        // Page catch-up responses below the frontend's response-byte ceiling.
+        // Advance the cursor only over returned lines, never over omitted ones.
+        List<String> newLogs = new ArrayList<>();
+        long chars = 0;
+        int end = start;
+        for (; end < logs.size() && newLogs.size() < 5000; end++) {
+            String redacted = redactLogLines(List.of(logs.get(end))).get(0);
+            if (chars + redacted.length() > 2L * 1024 * 1024) break;
+            chars += redacted.length();
+            newLogs.add(redacted);
+        }
 
         return Map.of(
-            "logs", redactLogLines(newLogs),
+            "logs", newLogs,
             "firstIndex", first,
-            "nextIndex", first + logs.size(),
+            "nextIndex", first + end,
+            "hasMore", end < logs.size(),
             "truncatedBefore", since < first,
             "maxBytes", MAX_BYTES,
             "maxLineBytes", MAX_LINE_BYTES
@@ -181,7 +192,15 @@ public class SimulationLogBuffer {
     public Map<String, Object> tail(int maxLines) {
         LogScope scope = currentRunLogScope();
         long first = scope.firstIndex;
-        int start = Math.max(0, scope.current.size() - maxLines);
+        int start = Math.max(0, scope.current.size() - Math.max(1, Math.min(maxLines, 500)));
+        long tailChars = 0;
+        int boundedStart = scope.current.size();
+        for (int i = scope.current.size() - 1; i >= start; i--) {
+            tailChars += scope.current.get(i).length();
+            if (tailChars > 2L * 1024 * 1024) break;
+            boundedStart = i;
+        }
+        start = boundedStart;
         List<String> lines = redactLogLines(scope.current.subList(start, scope.current.size()));
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("lines", lines);
@@ -197,8 +216,15 @@ public class SimulationLogBuffer {
         return out;
     }
 
-    public Map<String, Object> search(String query, boolean useRegex, boolean useCase, int maxMatches, int context)
-            throws PatternSyntaxException {
+    public Map<String, Object> search(String query, boolean useRegex, boolean useCase, int maxMatches, int context) {
+        if (query == null || query.length() > DEFAULT_MAX_REGEX_LENGTH)
+            throw new IllegalArgumentException("Search query is too long or missing");
+        maxMatches = Math.max(1, Math.min(maxMatches, 100));
+        context = Math.max(0, Math.min(context, 50));
+        long deadline = System.nanoTime() + 2_000_000_000L;
+        long resultChars = 0;
+        boolean budgetLimited = false;
+        int searched = 0;
         LogScope scope = currentRunLogScope();
         List<String> logs = scope.current;
         long first = scope.firstIndex + scope.start;
@@ -206,14 +232,26 @@ public class SimulationLogBuffer {
         Pattern pat = null;
         String q = useCase ? query : query.toLowerCase(Locale.ROOT);
         if (useRegex) {
-            pat = Pattern.compile(query, useCase ? 0 : Pattern.CASE_INSENSITIVE);
+            try {
+                pat = Pattern.compile(query, useCase ? 0 : Pattern.CASE_INSENSITIVE);
+            } catch (PatternSyntaxException invalid) {
+                throw new IllegalArgumentException("Invalid or unsupported RE2 search expression");
+            }
+            if (pat.programSize() > 10_000)
+                throw new IllegalArgumentException("Search expression is too complex");
         }
         for (int i = 0; i < logs.size() && matches.size() < maxMatches; i++) {
+            if (System.nanoTime() > deadline) { budgetLimited = true; break; }
+            searched++;
             String line = logs.get(i) == null ? "" : logs.get(i);
             boolean hit = useRegex ? pat.matcher(line).find() : (useCase ? line : line.toLowerCase(Locale.ROOT)).contains(q);
             if (!hit) continue;
             int a = Math.max(0, i - context);
             int b = Math.min(logs.size(), i + context + 1);
+            long added = line.length();
+            for (int j = a; j < b; j++) added += logs.get(j).length();
+            if (resultChars + added > 2L * 1024 * 1024) { budgetLimited = true; break; }
+            resultChars += added;
             matches.add(Map.of(
                 "index", first + i,
                 "line", redactLogLines(List.of(line)).get(0),
@@ -228,13 +266,14 @@ public class SimulationLogBuffer {
         out.put("matches", matches);
         out.put("returned", matches.size());
         out.put("maxMatches", maxMatches);
-        out.put("searchedLines", logs.size());
+        out.put("searchedLines", searched);
+        out.put("budgetLimited", budgetLimited);
         out.put("firstIndex", first);
         out.put("scopeStartIndex", first);
         out.put("nextIndex", scope.firstIndex + scope.all.size());
         out.put("outputRun", scope.outputRun);
-        out.put("truncatedMatches", matches.size() >= maxMatches);
-        out.put("note", "Current-run console log search, scoped from the latest Building New Simulation marker when present. Secrets/tokens/password-like values are redacted heuristically.");
+        out.put("truncatedMatches", budgetLimited || matches.size() >= maxMatches);
+        out.put("note", "Current-run console log search, scoped from the latest Building New Simulation marker when present. Regex uses RE2 syntax: backreferences and lookaround are unsupported. Secrets/tokens/password-like values are redacted heuristically.");
         return out;
     }
 }

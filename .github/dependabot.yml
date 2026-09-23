@@ -1,0 +1,10 @@
+# (C) Copyright 2026, by Ross Richardson
+# Weekly dependency update proposals; compatibility and advisory review precede merge.
+# @author ross richardson
+version: 2
+updates:
+  - package-ecosystem: "maven"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3

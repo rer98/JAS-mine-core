@@ -31,12 +31,14 @@ public final class CsvRecordReader implements AutoCloseable {
     private final int maxRecord;
     private final int maxField;
     private final int maxColumns;
+    private final Reader source;
 
     public CsvRecordReader(Reader reader, char delim) {
         this(reader, delim, Integer.MAX_VALUE, Integer.MAX_VALUE, Integer.MAX_VALUE);
     }
 
     public CsvRecordReader(Reader reader, char delim, int maxRecord, int maxField, int maxColumns) {
+        this.source = reader;
         this.in = new PushbackReader(new BufferedReader(reader), 1);
         this.delim = delim;
         this.maxRecord = maxRecord;
@@ -45,6 +47,7 @@ public final class CsvRecordReader implements AutoCloseable {
     }
 
     public List<String> readRecord() throws IOException {
+        if (source instanceof DiagnosticReader diagnostic) diagnostic.checkDeadline();
         if (eof) return null;
         List<String> fields = new ArrayList<>();
         StringBuilder field = new StringBuilder();
@@ -54,7 +57,7 @@ public final class CsvRecordReader implements AutoCloseable {
         int size = 0;
         while (true) {
             if (++size > maxRecord || field.length() > maxField || fields.size() >= maxColumns)
-                throw new IOException("Tabular record exceeds the record, field or column limit");
+                throw new DiagnosticLimitException("Tabular record exceeds the record, field or column limit");
             c = in.read();
             if (c == -1) {
                 eof = true;

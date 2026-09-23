@@ -1,10 +1,6 @@
 package microsim.web.server;
 
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -38,14 +34,29 @@ public final class TabularDataUtils {
         public List<String> getColumns() { return columns; }
     }
 
+    private static final long MAX_RESULT_CHARS = 2L * 1024 * 1024;
+
+    private static long textSize(List<String> row) {
+        return row == null ? 0 : row.stream().mapToLong(v -> v.length() + 8L).sum();
+    }
+
+    private static long keep(long size, long addition) throws DiagnosticLimitException {
+        long result = size + addition;
+        if (result > MAX_RESULT_CHARS)
+            throw new DiagnosticLimitException("Diagnostic result is too large; request fewer rows or download the file.");
+        return result;
+    }
+
     public static Map<String, Object> columns(File file, char delim, int previewRows) throws Exception {
+        long retained = 0;
         List<String> columns;
         List<List<String>> preview = new ArrayList<>();
-        try (CsvRecordReader reader = new CsvRecordReader(Files.newBufferedReader(file.toPath(), StandardCharsets.UTF_8), delim)) {
+        try (CsvRecordReader reader = DiagnosticReader.open(file.toPath(), delim)) {
             columns = reader.readRecord();
             for (int i = 0; i < previewRows; i++) {
                 List<String> rec = reader.readRecord();
                 if (rec == null) break;
+                retained = keep(retained, textSize(rec));
                 preview.add(rec);
             }
         }
@@ -59,6 +70,7 @@ public final class TabularDataUtils {
     }
 
     public static Map<String, Object> columnSummary(File file, char delim, String column, int topN, int maxDistinctValues) throws Exception {
+        long retained = 0;
         List<String> columns;
         long total = 0, missing = 0, numeric = 0;
         Double min = null, max = null, sum = 0.0;
@@ -66,7 +78,7 @@ public final class TabularDataUtils {
         long distinctOverflow = 0;
         boolean distinctLimited = false;
 
-        try (CsvRecordReader reader = new CsvRecordReader(Files.newBufferedReader(file.toPath(), StandardCharsets.UTF_8), delim)) {
+        try (CsvRecordReader reader = DiagnosticReader.open(file.toPath(), delim)) {
             columns = reader.readRecord();
             int idx = columns == null ? -1 : columns.indexOf(column);
             if (idx < 0) throw new MissingColumnException(column, columns);
@@ -76,6 +88,7 @@ public final class TabularDataUtils {
                 total++;
                 String v = idx < rec.size() ? rec.get(idx) : "";
                 if (v == null || v.isEmpty() || "null".equalsIgnoreCase(v)) { missing++; continue; }
+                if (!counts.containsKey(v) && counts.size() < maxDistinctValues) retained = keep(retained, v.length() + 8L);
                 if (!TabularFilterUtils.incrementCappedCount(counts, v, maxDistinctValues)) {
                     distinctLimited = true;
                     distinctOverflow++;
@@ -115,20 +128,24 @@ public final class TabularDataUtils {
     }
 
     public static Map<String, Object> sampleRows(File file, char delim, int limit, long seed) throws Exception {
+        long retained = 0;
         List<String> columns;
         List<List<String>> sample = new ArrayList<>();
         Random rng = new Random(seed);
         long seen = 0;
 
-        try (CsvRecordReader reader = new CsvRecordReader(Files.newBufferedReader(file.toPath(), StandardCharsets.UTF_8), delim)) {
+        try (CsvRecordReader reader = DiagnosticReader.open(file.toPath(), delim)) {
             columns = reader.readRecord();
             List<String> rec;
             while ((rec = reader.readRecord()) != null) {
                 seen++;
-                if (sample.size() < limit) sample.add(rec);
+                if (sample.size() < limit) { retained = keep(retained, textSize(rec)); sample.add(rec); }
                 else {
                     long j = (long) (rng.nextDouble() * seen);
-                    if (j < limit) sample.set((int) j, rec);
+                    if (j < limit) {
+                        retained = keep(retained, textSize(rec) - textSize(sample.get((int) j)));
+                        sample.set((int) j, rec);
+                    }
                 }
             }
         }
@@ -145,12 +162,19 @@ public final class TabularDataUtils {
     }
 
     public static Map<String, Object> findRows(File file, char delim, boolean header, List<Map<String, Object>> filters, int limit) throws Exception {
+        long retained = 0;
         List<String> columns;
+        if (filters.size() > 20) throw new DiagnosticLimitException("At most 20 diagnostic filters are allowed.");
+        for (var filter : filters) {
+            if (String.valueOf(filter.getOrDefault("value", "")).length() > 4096
+                    || String.valueOf(filter.getOrDefault("column", "")).length() > 256)
+                throw new DiagnosticLimitException("Diagnostic filter value or column is too long.");
+        }
         List<List<String>> rows = new ArrayList<>();
         long scanned = 0;
         boolean hasMore = false;
 
-        try (CsvRecordReader reader = new CsvRecordReader(Files.newBufferedReader(file.toPath(), StandardCharsets.UTF_8), delim)) {
+        try (CsvRecordReader reader = DiagnosticReader.open(file.toPath(), delim)) {
             columns = header ? reader.readRecord() : null;
             List<String> rec;
             while ((rec = reader.readRecord()) != null) {
@@ -171,7 +195,7 @@ public final class TabularDataUtils {
                     }
                 }
                 if (match) {
-                    if (rows.size() < limit) rows.add(rec);
+                    if (rows.size() < limit) { retained = keep(retained, textSize(rec)); rows.add(rec); }
                     else { hasMore = true; break; }
                 }
             }
@@ -190,14 +214,14 @@ public final class TabularDataUtils {
     }
 
     public static Map<String, Object> rows(File file, char delim, long offset, int limit, boolean header, boolean count) throws Exception {
+        long retained = 0;
         List<String> columns = null;
         List<List<String>> rows = new ArrayList<>();
         long seen = 0;
         boolean hasMore = false;
         boolean reachedEof = false;
 
-        try (InputStreamReader r = new InputStreamReader(new FileInputStream(file), StandardCharsets.UTF_8);
-             CsvRecordReader csv = new CsvRecordReader(r, delim)) {
+        try (CsvRecordReader csv = DiagnosticReader.open(file.toPath(), delim)) {
             if (header) {
                 List<String> head = TabularExportUtils.nextNonBlankRecord(csv);
                 if (head != null) columns = head;
@@ -205,6 +229,7 @@ public final class TabularDataUtils {
             List<String> rec;
             while ((rec = TabularExportUtils.nextNonBlankRecord(csv)) != null) {
                 if (seen >= offset && rows.size() < limit) {
+                    retained = keep(retained, textSize(rec));
                     rows.add(rec);
                 } else if (seen >= offset && rows.size() >= limit) {
                     hasMore = true;

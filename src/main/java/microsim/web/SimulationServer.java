@@ -340,8 +340,8 @@ public class SimulationServer {
                 ctx.json(logs.poll(since));
             });
 
-            config.routes.get("/simulation/logs/tail", SimulationServer::handleLogTail);
-            config.routes.get("/simulation/logs/search", SimulationServer::handleLogSearch);
+            config.routes.get("/simulation/logs/tail", ctx -> logDiagnostic(ctx, () -> handleLogTail(ctx)));
+            config.routes.get("/simulation/logs/search", ctx -> logDiagnostic(ctx, () -> handleLogSearch(ctx)));
 
 
 
@@ -386,6 +386,16 @@ public class SimulationServer {
         return LogRequestUtils.parseInteger(ctx.queryParam(name));
     }
 
+    private static final java.util.concurrent.Semaphore LOG_DIAGNOSTICS = new java.util.concurrent.Semaphore(2);
+
+    private static void logDiagnostic(Context ctx, Runnable action) {
+        if (!LOG_DIAGNOSTICS.tryAcquire()) {
+            ctx.status(429).json(Map.of("error", "Log diagnostics are busy. Please retry shortly."));
+            return;
+        }
+        try { action.run(); } finally { LOG_DIAGNOSTICS.release(); }
+    }
+
     private static void handleLogTail(Context ctx) {
         if (!requireDataToken(ctx)) return;
         int maxLines = LogRequestUtils.tailMaxLines(intQueryParam(ctx, "max_lines"));
@@ -412,8 +422,8 @@ public class SimulationServer {
         }
         try {
             ctx.json(logs.search(req.query(), req.regex(), req.caseSensitive(), req.maxMatches(), req.context()));
-        } catch (java.util.regex.PatternSyntaxException e) {
-            ctx.status(400).json(Map.of("error", "Invalid regex: " + e.getMessage()));
+        } catch (IllegalArgumentException e) {
+            ctx.status(400).json(Map.of("error", "Invalid or unsupported search expression"));
         }
     }
 
@@ -1275,6 +1285,8 @@ public class SimulationServer {
     private static boolean inputPolicyBuildStarted;
 
     private static String inputReadOnlyReason(File file) throws Exception {
+        String uploadRestriction = InputFileUtils.uploadReadOnlyReason(file.getName());
+        if (uploadRestriction != null) return uploadRestriction;
         Object builder = Class.forName(startClassName).getDeclaredConstructor().newInstance();
         if (!(builder instanceof microsim.input.InputEditingPolicy policy)) return null;
         String relative = new File("input").getCanonicalFile().toPath()

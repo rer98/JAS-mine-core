@@ -70,6 +70,12 @@
   </build>
 
   <dependencies>
+    <!-- Linear-time matching for user-supplied log-search expressions. -->
+    <dependency>
+      <groupId>com.google.re2j</groupId>
+      <artifactId>re2j</artifactId>
+      <version>1.8</version>
+    </dependency>
     <!-- Parse DB Explorer SQL without evaluating it; upgrades require the SQL safety suite. -->
     <dependency>
       <groupId>com.github.jsqlparser</groupId>
@@ -96,13 +102,13 @@
     <dependency>
       <groupId>org.apache.logging.log4j</groupId>
       <artifactId>log4j-slf4j2-impl</artifactId>
-      <version>2.26.0</version>
+      <version>2.26.1</version>
     </dependency>
 
     <dependency>
       <groupId>org.apache.logging.log4j</groupId>
       <artifactId>log4j-core</artifactId>
-      <version>2.26.0</version>
+      <version>2.26.1</version>
       <type>jar</type>
     </dependency>
     <dependency>

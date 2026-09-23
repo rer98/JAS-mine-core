@@ -12,15 +12,13 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
 
 
 /* (C) Copyright 2026, by Ross Richardson
  *
  * Input-file helpers for JAS-mine Web model inputs.
  * Safely resolves nested input paths, lists visible files and directories,
- * classifies file types, and replaces direct or zipped files atomically before Build.
+ * classifies file types, and replaces supported data files atomically before Build.
  *
  * @author ross richardson
  *
@@ -113,6 +111,12 @@ public final class InputFileUtils {
         return lower.endsWith(".xls") || lower.endsWith(".xlsx");
     }
 
+    public static String uploadReadOnlyReason(String filename) {
+        return "database".equals(classifyInputFile(filename))
+                ? "Database uploads are disabled because native databases can contain executable code. Use the model's supported data import instead."
+                : null;
+    }
+
     public static boolean isAllowedByDetailedDataPolicy(String filename, boolean detailedDataAccessAllowed) {
         return detailedDataAccessAllowed || isExcelFile(filename);
     }
@@ -137,30 +141,10 @@ public final class InputFileUtils {
     }
 
     public static void replaceInputFile(File target, InputStream in) throws IOException {
+        String reason = uploadReadOnlyReason(target.getName());
+        if (reason != null) throw new IllegalArgumentException(reason);
         in = UploadLimits.bounded(in);
-        if (target.getName().endsWith(".db")) replaceDatabaseFromZip(target, in);
-        else replaceDirect(target, in);
-    }
-
-    private static void replaceDatabaseFromZip(File target, InputStream in) throws IOException {
-        String filename = target.getName();
-        Path temp = Files.createTempFile(target.toPath().getParent(), filename, ".upload");
-        try (ZipInputStream zis = new ZipInputStream(in)) {
-            ZipEntry entry = zis.getNextEntry();
-            if (entry == null) throw new IllegalArgumentException("Received empty zip file");
-            if (entry.isDirectory() || !entry.getName().equals(filename)) {
-                throw new IllegalArgumentException("Zip entry must match target filename");
-            }
-            try (var out = Files.newOutputStream(temp)) {
-                UploadLimits.copy(zis, out, UploadLimits.available(temp.getParent(), UploadLimits.FILE_BYTES));
-            }
-            if (zis.getNextEntry() != null) {
-                throw new IllegalArgumentException("Zip upload must contain exactly one file");
-            }
-            Files.move(temp, target.toPath(), StandardCopyOption.REPLACE_EXISTING);
-        } finally {
-            Files.deleteIfExists(temp);
-        }
+        replaceDirect(target, in);
     }
 
     private static void replaceDirect(File target, InputStream in) throws IOException {

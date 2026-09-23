@@ -40,6 +40,10 @@ public final class ApiErrors {
     }
 
     public static void handleError(Context ctx, Exception error, PrintStream diagnosticSink) {
+        if (error instanceof DiagnosticLimitException) {
+            ctx.status(422).json(Map.of("error", error.getMessage(), "code", "diagnostic_limit"));
+            return;
+        }
         String path;
         try {
             path = ctx.path();
