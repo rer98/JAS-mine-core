@@ -24,7 +24,7 @@ import microsim.web.server.ParameterResponseUtils;
 import microsim.web.server.ExportFileUtils;
 import microsim.web.server.ExportStreamingUtils;
 import microsim.web.server.InputFileUtils;
-import microsim.web.server.MemoryMonitor;
+import microsim.monitoring.MemoryMonitor;
 import microsim.web.server.GracefulShutdown;
 import microsim.web.server.MetadataFileUtils;
 import microsim.web.server.LogRequestUtils;
@@ -130,7 +130,8 @@ public class SimulationServer {
     private static final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
     private static final PrintStream DIAGNOSTIC_SINK = System.err;
     private static final SimulationLogBuffer logs = new SimulationLogBuffer(SimulationLogBuffer.DEFAULT_MAX_LINES);
-    private static final MemoryMonitor memoryMonitor = new MemoryMonitor(SimulationServer::addLogMessage);
+    // Resolve System.out when a warning is emitted, after browser log capture is installed.
+    private static final MemoryMonitor memoryMonitor = new MemoryMonitor(message -> System.out.println(message));
 
     public static void addLogMessage(String message) {
         logs.add(message);

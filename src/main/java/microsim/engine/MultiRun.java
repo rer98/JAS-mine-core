@@ -8,6 +8,7 @@ import java.util.Map;
 import microsim.data.ExperimentManager;
 import microsim.data.ParameterDomain;
 import microsim.event.SystemEventType;
+import microsim.monitoring.MemoryMonitor;
 
 /**
  * MultiRun is a template abstract class useful to guide the modeller to build
@@ -95,9 +96,22 @@ public abstract class MultiRun extends Thread implements EngineListener, Experim
 
     /**
      * MultiRun is an independent thread. The run method controls the sequence
-     * of simulations.
+     * of simulations. Memory monitoring is opt-in through
+     * {@code -Djasmine.memory.monitor.enabled=true}; desktop runs retain their
+     * original behaviour unless their launcher explicitly enables it.
      */
     public synchronized void run() {
+        if (!Boolean.getBoolean(MemoryMonitor.MULTIRUN_ENABLE_PROPERTY)) {
+            runSimulations();
+            return;
+        }
+        try (MemoryMonitor monitor = new MemoryMonitor(message -> System.out.println(message))) {
+            monitor.start();
+            runSimulations();
+        }
+    }
+
+    private void runSimulations() {
         while (toBeContinued) {
             executionActive = true;
             try {

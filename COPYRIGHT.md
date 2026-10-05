@@ -21,6 +21,7 @@ Upstream baseline used to identify new files: `5a5b2db00bc379b53e6e2d946896c5fb4
 
 - `src/main/java/microsim/data/GUIParameterHistory.java`
 - `src/main/java/microsim/data/StorageProtection.java`
+- `src/main/java/microsim/monitoring/MemoryMonitor.java`
 - `src/main/java/microsim/web/ChartProcessorSupport.java`
 - `src/main/java/microsim/web/ChartProcessors.java`
 - `src/main/java/microsim/web/SimulationServer.java`
@@ -56,6 +57,8 @@ Upstream baseline used to identify new files: `5a5b2db00bc379b53e6e2d946896c5fb4
 - `src/test/java/microsim/data/ExperimentManagerLifecycleTest.java`
 - `src/test/java/microsim/data/GUIParameterHistoryTest.java`
 - `src/test/java/microsim/gui/GuiUtilsWebModeTest.java`
+- `src/test/java/microsim/monitoring/MemoryMonitorTest.java`
+- `src/test/java/microsim/monitoring/MultiRunMemoryMonitorTest.java`
 - `src/test/java/microsim/web/ChartProcessorsTest.java`
 - `src/test/java/microsim/web/HistogramProcessorTest.java`
 - `src/test/java/microsim/web/WebBuildValidationTest.java`
@@ -72,7 +75,7 @@ Upstream baseline used to identify new files: `5a5b2db00bc379b53e6e2d946896c5fb4
 - `src/test/java/microsim/web/server/HardResetAuthTest.java`
 - `src/test/java/microsim/web/server/InputFileUtilsTest.java`
 - `src/test/java/microsim/web/server/LogRequestUtilsTest.java`
-- `src/test/java/microsim/web/server/MemoryMonitorTest.java`
+- `src/test/java/microsim/web/server/MemoryMonitorCompatibilityTest.java`
 - `src/test/java/microsim/web/server/MetadataFileUtilsTest.java`
 - `src/test/java/microsim/web/server/OutputFileResolverTest.java`
 - `src/test/java/microsim/web/server/ParameterIntrospectionTest.java`

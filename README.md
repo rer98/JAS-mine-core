@@ -36,6 +36,36 @@ mvn javadoc:javadoc
 
 It is generated in `target/reports/apidocs`.
 
+## Shared memory monitoring
+
+`microsim.monitoring.MemoryMonitor` supplies the same memory monitoring to the
+interactive `SimulationServer` and an explicitly enabled `MultiRun` execution
+thread. The web server starts monitoring from its dedicated entry point. Generic
+MultiRun execution leaves monitoring disabled by default; hosted launchers opt in
+with `-Djasmine.memory.monitor.enabled=true` before the Java main class or `-jar`.
+Desktop launchers can use the same option if monitoring is wanted. It samples
+every ten seconds and sends heap and container working-set warnings to each
+application's current simulation console when usage exceeds 85%, at most once
+every thirty seconds for each warning type. The monitor is a daemon and is
+stopped on normal shutdown; terminating a MultiRun JVM also ends its monitor.
+
+The public `sample()` method returns a numeric snapshot of used, committed and
+maximum Java heap, the current container limit and usage, and inactive file
+cache. Container working-set usage subtracts inactive file cache from raw usage,
+clamped at zero; if cache measurements are unavailable, it uses raw usage.
+Unavailable container measurements remain absent rather than being inferred
+from heap measurements. Heap monitoring continues independently. Desktop heap
+readings apply to its Java process; any cgroup readings describe the exposed
+Linux resource group, not a portable measurement of Java off-heap memory.
+
+The container limit is read again on every sample, so monitoring recognises an
+operator-approved live limit increase. Monitoring does not change allocations,
+Java heap settings, simulation calculations or retry policy. Automatic resource
+growth and resource-specific recovery require separate hosting integration.
+The original `microsim.web.server.MemoryMonitor` public class remains available
+as a deprecated facade. Rebuild model artifacts with the updated core to include
+the shared monitor; existing pinned model releases remain unchanged.
+
 
 ## Session storage protection
 

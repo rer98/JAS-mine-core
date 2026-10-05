@@ -34,7 +34,7 @@
  *   <li><b>Configuration and monitoring</b>:
  *     {@link microsim.web.server.WebServerConfig} loads Java web-server
  *     configuration from properties and environment variables;
- *     {@link microsim.web.server.MemoryMonitor} provides container-aware
+ *     {@link microsim.monitoring.MemoryMonitor} provides shared container-aware
  *     memory warnings.</li>
  *
  *   <li><b>Safe path and file handling</b>:
