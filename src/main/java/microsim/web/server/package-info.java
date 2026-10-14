@@ -76,6 +76,23 @@
  *     {@code microsim.web.ChartProcessors}.</li>
  * </ul>
  *
+ * <h2>Console and export boundaries</h2>
+ *
+ * <p>Restricted models ({@code allowDetailedDataAccess=false}) reject console
+ * poll, tail, and search requests with HTTP 403. Their reviewed diagnostics and
+ * lifecycle status remain available. Log searches use the same sanitized text
+ * delivered to callers, and output-run annotations accept run identifiers only.</p>
+ *
+ * <p>Recursive output listing and ZIP export require a filesystem provider with
+ * {@link java.nio.file.SecureDirectoryStream} support (available on the target
+ * Linux deployment). They fail closed on unsupported providers, including some
+ * desktop filesystems. Every directory component and file open rejects symbolic
+ * links; traversal is limited to 100,000 entries and 64 nested directories.
+ * Model output writers remain trusted: replacing files concurrently with device
+ * nodes or FIFOs is unsupported. The model containers must not be treated as a
+ * sandbox for arbitrary third-party code, and output directories must not be
+ * writable by other untrusted local users.</p>
+ *
  * <h2>Design rule</h2>
  *
  * <p>Add new code here when it is a cohesive helper that can be tested without

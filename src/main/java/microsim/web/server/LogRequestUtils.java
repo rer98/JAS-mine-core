@@ -13,6 +13,8 @@ package microsim.web.server;
 
 /** Request parsing helpers for simulation log endpoints. */
 public final class LogRequestUtils {
+    public static final String RESTRICTED_LOG_MESSAGE =
+        "Console logs are disabled for this model. Use safe diagnostics instead.";
     private LogRequestUtils() {}
 
     public record SearchRequest(String query, boolean regex, boolean caseSensitive, int maxMatches, int context) {}

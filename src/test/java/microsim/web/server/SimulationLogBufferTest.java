@@ -20,6 +20,18 @@ import org.junit.jupiter.api.Test;
 
 public class SimulationLogBufferTest {
     @Test
+    void searchesCannotDiscoverRedactedValuesOrExposeArbitraryOutputAnnotations() {
+        SimulationLogBuffer logs = new SimulationLogBuffer(100);
+        logs.add("password=fictionalSecret777");
+        logs.add("--- Output run: secret=fictionalSecret777 ---");
+        assertEquals(0, logs.search("fictionalSecret7", false, true, 10, 0).get("returned"));
+        assertEquals(0, logs.search("fictionalSecret[0-9]+", true, true, 10, 0).get("returned"));
+        assertEquals(2, logs.search("REDACTED", false, true, 10, 0).get("returned"));
+        assertNull(logs.tail(10).get("outputRun"));
+        assertNull(logs.search("password", false, true, 10, 0).get("outputRun"));
+    }
+
+    @Test
     void boundedCatchupPagesDoNotSkipRetainedLines() {
         SimulationLogBuffer logs = new SimulationLogBuffer(7000);
         for (int i = 0; i < 6500; i++) logs.add("line-" + i);

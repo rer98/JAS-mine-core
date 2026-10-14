@@ -167,7 +167,9 @@ public class SimulationLogBuffer {
                 int pos = line.indexOf(LOG_OUTPUT_RUN_PREFIX);
                 if (pos >= 0) {
                     String candidate = line.substring(pos + LOG_OUTPUT_RUN_PREFIX.length()).replace("---", "").trim();
-                    if (!candidate.isEmpty()) outputRun = candidate;
+                    // This annotation is also returned to browsers. Only actual
+                    // run-directory identifiers may leave the console buffer.
+                    if (PathSafety.isSafeTimestamp(candidate)) outputRun = candidate;
                 }
             }
             if (line.contains(LOG_RUN_MARKER)) {
@@ -243,7 +245,9 @@ public class SimulationLogBuffer {
         for (int i = 0; i < logs.size() && matches.size() < maxMatches; i++) {
             if (System.nanoTime() > deadline) { budgetLimited = true; break; }
             searched++;
-            String line = logs.get(i) == null ? "" : logs.get(i);
+            // Search exactly the representation a caller may see. Searching the
+            // original text would reveal redacted values through match/no-match.
+            String line = redactLogLines(List.of(logs.get(i))).get(0);
             boolean hit = useRegex ? pat.matcher(line).find() : (useCase ? line : line.toLowerCase(Locale.ROOT)).contains(q);
             if (!hit) continue;
             int a = Math.max(0, i - context);
@@ -254,7 +258,7 @@ public class SimulationLogBuffer {
             resultChars += added;
             matches.add(Map.of(
                 "index", first + i,
-                "line", redactLogLines(List.of(line)).get(0),
+                "line", line,
                 "contextStartIndex", first + a,
                 "contextLines", redactLogLines(logs.subList(a, b))
             ));

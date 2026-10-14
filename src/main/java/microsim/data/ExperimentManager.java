@@ -153,6 +153,13 @@ public class ExperimentManager {
     // }
 
     public Experiment setupExperiment(Experiment experiment, Object... models) throws Exception {
+        if (experiment.isGeneratedOutputFolder()) {
+            var output = java.nio.file.Path.of(experiment.getOutputFolder()).toAbsolutePath().normalize();
+            java.nio.file.Files.createDirectories(output.getParent());
+            // Exclusive creation also protects against a rare identifier
+            // collision across processes or a pre-existing legacy run.
+            java.nio.file.Files.createDirectory(output);
+        }
         final String outFolder = experiment.getOutputFolder() + File.separator + "input";
 
         ExportCSV.directory = experiment.getOutputFolder() + File.separator + "csv";

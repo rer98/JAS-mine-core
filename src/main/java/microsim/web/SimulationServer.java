@@ -336,10 +336,7 @@ public class SimulationServer {
             // });
 
             // Polling
-            config.routes.get("/simulation/logs/poll", ctx -> {
-                long since = ctx.queryParamAsClass("since", Long.class).getOrDefault(0L);
-                ctx.json(logs.poll(since));
-            });
+            config.routes.get("/simulation/logs/poll", SimulationServer::handleLogPoll);
 
             config.routes.get("/simulation/logs/tail", ctx -> logDiagnostic(ctx, () -> handleLogTail(ctx)));
             config.routes.get("/simulation/logs/search", ctx -> logDiagnostic(ctx, () -> handleLogSearch(ctx)));
@@ -397,13 +394,27 @@ public class SimulationServer {
         try { action.run(); } finally { LOG_DIAGNOSTICS.release(); }
     }
 
+    private static boolean requireConsoleAccess(Context ctx) {
+        if (detailedDataAccessAllowed) return true;
+        ctx.status(403).json(Map.of("error", microsim.web.server.LogRequestUtils.RESTRICTED_LOG_MESSAGE));
+        return false;
+    }
+
+    private static void handleLogPoll(Context ctx) {
+        if (!requireConsoleAccess(ctx)) return;
+        long since = ctx.queryParamAsClass("since", Long.class).getOrDefault(0L);
+        ctx.json(logs.poll(since));
+    }
+
     private static void handleLogTail(Context ctx) {
+        if (!requireConsoleAccess(ctx)) return;
         if (!requireDataToken(ctx)) return;
         int maxLines = LogRequestUtils.tailMaxLines(intQueryParam(ctx, "max_lines"));
         ctx.json(logs.tail(maxLines));
     }
 
     private static void handleLogSearch(Context ctx) {
+        if (!requireConsoleAccess(ctx)) return;
         if (!requireDataToken(ctx)) return;
         String query = ctx.queryParam("query");
         if (query == null || query.isBlank()) {
@@ -894,6 +905,16 @@ public class SimulationServer {
             }
             ctx.json(SimulationLifecycleResponses.timedStatus("built", engine.getTime()));
         } catch (Exception e) {
+            // Never leave stale model references available to Start after a
+            // partial build. Keep partial output for diagnosis, not execution.
+            try { disposeSimulationState(false); }
+            catch (Exception cleanup) {
+                e.addSuppressed(cleanup);
+                engine = null;
+                model = null;
+                collector = null;
+                GuiUtils.clearRegistry();
+            }
             ApiErrors.handleError(ctx, e, DIAGNOSTIC_SINK);
         } finally {
             // stopMemoryMonitor(); 

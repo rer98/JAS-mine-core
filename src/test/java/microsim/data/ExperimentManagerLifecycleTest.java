@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -84,6 +85,31 @@ class ExperimentManagerLifecycleTest {
         Experiment.testOutputFolder = originalTestOutputFolder;
         DatabaseUtils.databaseInputUrl = originalInputUrl;
         ExportCSV.directory = null;
+    }
+
+    @Test
+    void generatedRunNamesRemainCompatibleAndNeverReuseAnExistingDirectory() throws Exception {
+        manager.saveExperimentOnDatabase = false;
+        manager.copyInputFolderStructure = false;
+        var names = new java.util.HashSet<String>();
+        for (int i = 0; i < 1000; i++) {
+            Experiment experiment = manager.createExperiment("606_0");
+            assertTrue(names.add(experiment.getOutputFolder()));
+            assertTrue(experiment.runId.matches("[0-9]{14}-[0-9]+"));
+            assertTrue(experiment.getOutputFolder().endsWith("_606_0"));
+            assertTrue(microsim.web.server.PathSafety.isSafeTimestamp(Path.of(experiment.getOutputFolder()).getFileName().toString()));
+        }
+        Experiment collision = manager.createExperiment(null);
+        Path folder = Path.of(collision.getOutputFolder());
+        Files.createDirectories(folder);
+        Path sentinel = folder.resolve("GUIparameters.csv");
+        Files.writeString(sentinel, "earlier run must survive");
+        assertThrows(java.nio.file.FileAlreadyExistsException.class,
+                () -> manager.setupExperiment(collision, new ModelFixture(8)));
+        assertEquals("earlier run must survive", Files.readString(sentinel));
+        Experiment next = manager.createExperiment(null);
+        manager.setupExperiment(next, new ModelFixture(9));
+        assertTrue(Files.exists(Path.of(next.getOutputFolder(), "GUIparameters.csv")));
     }
 
     @Test
