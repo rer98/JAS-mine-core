@@ -19,6 +19,7 @@ Upstream baseline used to identify new files: `5a5b2db00bc379b53e6e2d946896c5fb4
 
 ## Files with inline notices
 
+- `src/test/java/microsim/web/server/DetailedDataAccessReadinessTest.java`
 - `src/main/java/microsim/data/GUIParameterHistory.java`
 - `src/main/java/microsim/data/StorageProtection.java`
 - `src/main/java/microsim/monitoring/MemoryMonitor.java`

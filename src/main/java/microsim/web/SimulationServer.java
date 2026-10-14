@@ -677,12 +677,9 @@ public class SimulationServer {
 
     private static void handleDetailedDataAccess(Context ctx) {
         if (!requireDataToken(ctx)) return;
-        lock.readLock().lock();
-        try {
-            ctx.json(Map.of("detailedDataAccessAllowed", detailedDataAccessAllowed));
-        } finally {
-            lock.readLock().unlock();
-        }
+        // This policy is fixed before the HTTP listener starts. Reading it needs
+        // no engine lock: a page reload during Build must not wait for the model.
+        ctx.json(Map.of("detailedDataAccessAllowed", detailedDataAccessAllowed));
     }
 
     private static void handleExportList(Context ctx) {
