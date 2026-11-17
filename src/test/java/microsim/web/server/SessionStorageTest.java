@@ -27,6 +27,35 @@ class SessionStorageTest {
         Files.delete(root.resolve("input/a.xlsx"));s.requireBuildCapacity();
         new SessionStorage(root,0,0,0).requireBuildCapacity();
     }
+    private SessionStorage quota(long available) {
+        long gib=1024L*1024L*1024L;
+        return new SessionStorage(root,10*gib,3*gib,2*gib,true,()->new SessionStorage.Capacity(10*gib,available));
+    }
+    @Test void quotaCapacityUsesTheEnforcedFilesystemViewAndDoesNotInventAUsedCount() throws Exception {
+        file("input/packaged.xlsx");long gib=1024L*1024L*1024L;
+        var reading=quota(7*gib).status();
+        assertEquals("docker-quota",reading.get("accounting"));
+        assertEquals(7*gib,reading.get("remainingBytes"));
+        assertEquals(true,reading.get("quotaCapacityVerified"));
+        assertFalse(reading.containsKey("usedBytes"));
+    }
+    @Test void quotaReserveAndWarningUseStrict512MiBAndOneGiBBoundaries() throws Exception {
+        long mib=1024L*1024L;
+        assertThrows(IllegalStateException.class,()->quota(512*mib-1).requireBuildCapacity());
+        quota(512*mib).requireBuildCapacity();
+        assertEquals(true,quota(512*mib).status().get("warning"));
+        assertEquals(true,quota(1024*mib-1).status().get("warning"));
+        assertEquals(false,quota(1024*mib).status().get("warning"));
+    }
+    @Test void quotaModeRejectsHostWideOrInvalidCapacityInsteadOfFallingBackToFileCounts() {
+        long gib=1024L*1024L*1024L;
+        for(var capacity:List.of(new SessionStorage.Capacity(48*gib,7*gib),
+                new SessionStorage.Capacity(10*gib,-1),new SessionStorage.Capacity(10*gib,11*gib))) {
+            var storage=new SessionStorage(root,10*gib,3*gib,2*gib,true,()->capacity);
+            assertThrows(java.io.IOException.class,storage::status);
+            assertThrows(java.io.IOException.class,storage::requireBuildCapacity);
+        }
+    }
     @Test void selectedRunRetainsOnlyProtectedDatabaseFamiliesAndTheirPaths() throws Exception {
         for(String name:List.of("database/out.mv.db","database/out.lock.db","database/notes.txt",
                 "input/input.mv.db","input/input.trace.db","input/options.txt","input/a.xlsx","csv/Person.csv")) file("output/first/"+name);

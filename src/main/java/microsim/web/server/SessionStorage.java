@@ -13,23 +13,43 @@ import java.util.*;
  *
  */
 public final class SessionStorage {
+    private static final long MIB = 1024L * 1024L;
+    private static final long QUOTA_RESERVE = 512L * MIB;
+    private static final long QUOTA_WARNING = 1024L * MIB;
     private final Path root;
     private final long allowance, warning, reserve;
+    private final boolean quotaCapacity;
+    private final CapacityReader capacityReader;
     private final Set<Path> retired = new HashSet<>();
     private Map<String, Map<String, Stamp>> preview = Map.of();
     private String token;
     private long expires;
     private record Stamp(long size, long modified, Object key) {}
+    record Capacity(long total, long available) {}
+    @FunctionalInterface interface CapacityReader { Capacity read() throws IOException; }
 
     public SessionStorage(Path root, long allowance, long warning, long reserve) {
+        this(root, allowance, warning, reserve, false, () -> capacity(root));
+    }
+    SessionStorage(Path root, long allowance, long warning, long reserve, boolean quotaCapacity, CapacityReader capacityReader) {
         this.root = root.toAbsolutePath().normalize();
         if (allowance < 0 || reserve < 0 || warning < reserve || (allowance > 0 && warning >= allowance))
             throw new IllegalArgumentException("Invalid session storage thresholds");
         this.allowance = allowance; this.warning = warning; this.reserve = reserve;
+        this.quotaCapacity = quotaCapacity; this.capacityReader = capacityReader;
+    }
+    private static Capacity capacity(Path root) throws IOException {
+        FileStore store = Files.getFileStore(root);
+        return new Capacity(store.getTotalSpace(), store.getUsableSpace());
     }
     public static SessionStorage fromEnvironment() {
-        return new SessionStorage(Path.of("."), env("JASMINE_STORAGE_BYTES"),
-            env("JASMINE_STORAGE_WARN_BYTES"), env("JASMINE_STORAGE_RESERVE_BYTES"));
+        String mode = System.getenv().getOrDefault("JASMINE_STORAGE_ACCOUNTING", "files");
+        if (!Set.of("files", "docker-quota").contains(mode))
+            throw new IllegalArgumentException("Unknown session storage accounting mode");
+        Path root = Path.of(".");
+        return new SessionStorage(root, env("JASMINE_STORAGE_BYTES"),
+            env("JASMINE_STORAGE_WARN_BYTES"), env("JASMINE_STORAGE_RESERVE_BYTES"),
+            mode.equals("docker-quota"), () -> capacity(root));
     }
     private static long env(String name) { return Long.parseLong(System.getenv().getOrDefault(name, "0")); }
     public boolean enabled() { return allowance > 0; }
@@ -39,6 +59,21 @@ public final class SessionStorage {
     }
     public Map<String, Object> status() throws IOException {
         if (!enabled()) return Map.of("enabled", false);
+        if (quotaCapacity) {
+            Capacity current = capacityReader.read();
+            // Production overlay2/XFS reports this project's hard limit through
+            // statvfs. Refuse a host-wide or otherwise unverified capacity view.
+            if (current.total() != allowance || current.available() < 0 || current.available() > allowance)
+                throw new IOException("The session quota capacity could not be verified");
+            long available = current.available();
+            // Exact quota-used counters come from the private host reader.
+            // Do not mislabel host-shortage-adjusted free space as quota usage.
+            return Map.of("enabled", true, "accounting", "docker-quota",
+                "quotaCapacityVerified", true, "allowanceBytes", allowance,
+                "filesystemFreeBytes", available, "remainingBytes", available,
+                "warning", available < QUOTA_WARNING, "buildBlocked", available < QUOTA_RESERVE,
+                "quotaUsageRequiresHostReading", true);
+        }
         long used = 0;
         try (var paths = Files.walk(root)) {
             for (Path p : paths.toList()) {
